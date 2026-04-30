@@ -1,0 +1,174 @@
+name: Build CityGaussian Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-env:
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.9"
+          activate-environment: base
+
+      - name: Show system information
+        run: |
+          uname -a
+          df -h
+          free -h
+          conda --version
+          python --version
+
+      - name: Clone CityGaussian repository
+        run: |
+          git clone https://github.com/DekuLiuTesla/CityGaussian.git
+          cd CityGaussian
+          git rev-parse HEAD
+
+      - name: Create conda environment
+        run: |
+          conda create -y -n gspl python=3.9 pip
+          conda run -n gspl python --version
+          conda run -n gspl pip --version
+
+      - name: Upgrade pip tools
+        run: |
+          conda run -n gspl python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install PyTorch CUDA 11.8 requirements
+        run: |
+          cd CityGaussian
+          conda run -n gspl pip install -r requirements/pyt251_cu124.txt
+
+      - name: Install main requirements
+        run: |
+          cd CityGaussian
+          conda run -n gspl pip install -r requirements.txt
+
+      - name: Install CityGaussian additional requirements
+        run: |
+          cd CityGaussian
+          conda run -n gspl pip install -r requirements/CityGS.txt
+
+      - name: Test Python environment
+        run: |
+          conda run -n gspl python - <<'EOF'
+          import sys
+          print("Python:", sys.version)
+
+          try:
+              import torch
+              print("Torch:", torch.__version__)
+              print("CUDA available:", torch.cuda.is_available())
+              print("Torch CUDA:", torch.version.cuda)
+          except Exception as e:
+              print("Torch import failed:", repr(e))
+          EOF
+
+      - name: Install conda-pack
+        run: |
+          conda install -y -n base conda-pack
+
+      - name: Pack conda environment
+        run: |
+          conda pack -n gspl -o citygaussian-gspl-env.tar.gz --ignore-missing-files
+          ls -lh citygaussian-gspl-env.tar.gz
+
+      - name: Save CityGaussian source code
+        run: |
+          tar --exclude='.git' -czf CityGaussian-source.tar.gz CityGaussian
+          ls -lh CityGaussian-source.tar.gz
+
+      - name: Split environment package into 10 parts
+        run: |
+          split -n 10 -d -a 2 citygaussian-gspl-env.tar.gz citygaussian-gspl-env.tar.gz.part-
+          ls -lh citygaussian-gspl-env.tar.gz.part-*
+
+      - name: Generate SHA256 checksums
+        run: |
+          sha256sum citygaussian-gspl-env.tar.gz > citygaussian-gspl-env.tar.gz.sha256
+          sha256sum citygaussian-gspl-env.tar.gz.part-* > citygaussian-gspl-env.parts.sha256
+          sha256sum CityGaussian-source.tar.gz > CityGaussian-source.tar.gz.sha256
+
+          cat citygaussian-gspl-env.tar.gz.sha256
+          cat CityGaussian-source.tar.gz.sha256
+
+      - name: Create release tag
+        id: tag
+        run: |
+          TAG="citygaussian-env-${GITHUB_RUN_NUMBER}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+
+      - name: Create GitHub Release and upload files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+
+          gh release create "$TAG" \
+            citygaussian-gspl-env.tar.gz.part-* \
+            citygaussian-gspl-env.tar.gz.sha256 \
+            citygaussian-gspl-env.parts.sha256 \
+            CityGaussian-source.tar.gz \
+            CityGaussian-source.tar.gz.sha256 \
+            --title "CityGaussian Environment $TAG" \
+            --notes "CityGaussian conda environment built by GitHub Actions.
+
+          Files:
+
+          - citygaussian-gspl-env.tar.gz.part-00 ~ part-09: conda environment package split into 10 parts
+          - citygaussian-gspl-env.tar.gz.sha256: checksum of merged environment package
+          - citygaussian-gspl-env.parts.sha256: checksum of each part
+          - CityGaussian-source.tar.gz: CityGaussian source code
+
+          Restore on Linux:
+
+          \`\`\`bash
+          cat citygaussian-gspl-env.tar.gz.part-* > citygaussian-gspl-env.tar.gz
+          sha256sum -c citygaussian-gspl-env.tar.gz.sha256
+
+          mkdir -p gspl
+          tar -xzf citygaussian-gspl-env.tar.gz -C gspl
+          source gspl/bin/activate
+          conda-unpack
+          \`\`\`
+          "
+
+      - name: Upload artifact backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: citygaussian-env-parts
+          path: |
+            citygaussian-gspl-env.tar.gz.part-*
+            citygaussian-gspl-env.tar.gz.sha256
+            citygaussian-gspl-env.parts.sha256
+            CityGaussian-source.tar.gz
+            CityGaussian-source.tar.gz.sha256
+
+      - name: Print download link
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          echo "## Download Link" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release page:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Artifact backup page:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
