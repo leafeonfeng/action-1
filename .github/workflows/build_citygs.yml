@@ -136,10 +136,21 @@ jobs:
         run: |
           cd CityGaussian
 
-          grep -viE '^[[:space:]]*(torch|torchvision|torchaudio)([=<>!~ ;]|$)' requirements.txt > /tmp/requirements-no-torch.txt
+          rm -rf /tmp/citygaussian-req
+          mkdir -p /tmp/citygaussian-req
 
-          echo "===== filtered requirements.txt ====="
-          cat /tmp/requirements-no-torch.txt
+          cp requirements.txt /tmp/citygaussian-req/requirements.txt
+          cp -a requirements /tmp/citygaussian-req/requirements
+
+          find /tmp/citygaussian-req -type f -name "*.txt" -print0 | while IFS= read -r -d '' f; do
+            sed -i -E '/^[[:space:]]*(torch|torchvision|torchaudio)([=<>!~ ;]|$)/Id' "$f"
+          done
+
+          echo "===== filtered /tmp/citygaussian-req/requirements.txt ====="
+          cat /tmp/citygaussian-req/requirements.txt
+
+          echo "===== filtered nested requirements ====="
+          find /tmp/citygaussian-req -type f -name "*.txt" -maxdepth 3 -print
 
           conda run -n gspl bash -lc '
             echo "CUDA_HOME=$CUDA_HOME"
@@ -147,7 +158,7 @@ jobs:
             echo "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
             which nvcc
             nvcc --version
-            python -m pip install --no-build-isolation -r /tmp/requirements-no-torch.txt
+            python -m pip install --no-build-isolation -r /tmp/citygaussian-req/requirements.txt
           '
 
       - name: Verify PyTorch after main requirements
