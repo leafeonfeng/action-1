@@ -3,16 +3,9 @@ name: Build CityGaussian Environment
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build-env:
     runs-on: ubuntu-24.04
-
-    defaults:
-      run:
-        shell: bash -el {0}
 
     steps:
       - name: Checkout current repository
