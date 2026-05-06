@@ -139,13 +139,6 @@ jobs:
           PART_COUNT=$(ls split_artifacts/gspl-ubuntu2404-python39-cu124.tar.gz.part-* | wc -l)
           echo "Part count: ${PART_COUNT}"
 
-          if [ "${PART_COUNT}" -gt 2 ]; then
-            echo "ERROR: More than 2 parts were generated."
-            echo "The environment is larger than expected."
-            echo "Please either increase part size or upload more artifacts."
-            exit 1
-          fi
-
       - name: Upload environment artifact part 00
         uses: actions/upload-artifact@v4
         with:
@@ -160,28 +153,41 @@ jobs:
           path: split_artifacts/gspl-ubuntu2404-python39-cu124.tar.gz.part-01
           retention-days: 7
 
+      - name: Upload environment artifact part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: gspl-ubuntu2404-python39-cu124-part-02
+          path: split_artifacts/gspl-ubuntu2404-python39-cu124.tar.gz.part-02
+          retention-days: 7
+
       - name: Add download link to summary
         shell: bash
         run: |
           echo "## CityGaussian Environment Download" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "环境已经构建完成，并拆分为 GitHub Actions Artifact。" >> "$GITHUB_STEP_SUMMARY"
+          echo "环境已经构建完成，并拆分为 3 个 GitHub Actions Artifact。" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "下载入口：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "需要下载下面两个 Artifact：" >> "$GITHUB_STEP_SUMMARY"
+          echo "需要下载下面三个 Artifact：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "1. \`gspl-ubuntu2404-python39-cu124-part-00\`" >> "$GITHUB_STEP_SUMMARY"
           echo "2. \`gspl-ubuntu2404-python39-cu124-part-01\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "3. \`gspl-ubuntu2404-python39-cu124-part-02\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "合并命令：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
           echo "cat gspl-ubuntu2404-python39-cu124.tar.gz.part-00 \\" >> "$GITHUB_STEP_SUMMARY"
           echo "    gspl-ubuntu2404-python39-cu124.tar.gz.part-01 \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "    gspl-ubuntu2404-python39-cu124.tar.gz.part-02 \\" >> "$GITHUB_STEP_SUMMARY"
           echo "    > gspl-ubuntu2404-python39-cu124.tar.gz" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "mkdir -p gspl" >> "$GITHUB_STEP_SUMMARY"
+          echo "tar -xzf gspl-ubuntu2404-python39-cu124.tar.gz -C ./gspl" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "mkdir -p gspl" >> "$GITHUB_STEP_SUMMARY"
           echo "tar -xzf gspl-ubuntu2404-python39-cu124.tar.gz -C ./gspl" >> "$GITHUB_STEP_SUMMARY"
