@@ -1,4 +1,4 @@
-name: Build CityGaussian Env Ubuntu2404 CUDA124 PyTorch251 Safe
+name: Build CityGaussian Safe Env
 
 on:
   workflow_dispatch:
@@ -6,59 +6,64 @@ on:
 permissions:
   contents: write
 
+env:
+  CONDA_NO_PLUGINS: "true"
+  PYTHONNOUSERSITE: "1"
+  GSPL_PREFIX: /usr/share/miniconda/envs/gspl
+
 jobs:
-  build-env:
+  build:
     runs-on: ubuntu-24.04
 
     defaults:
       run:
-        shell: bash -el {0}
+        shell: bash {0}
 
     steps:
-      - name: Checkout current repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
-          auto-update-conda: true
+          auto-update-conda: false
+          auto-activate-base: false
           python-version: "3.10"
-          activate-environment: base
 
-      - name: Show system information
+      - name: Show basic info
         run: |
+          set -eux
           uname -a
           lsb_release -a || true
-          df -h
-          free -h
+          which conda
           conda --version
-          python --version
-          gcc --version
-          g++ --version
+          echo "GSPL_PREFIX=$GSPL_PREFIX"
 
-      - name: Clone CityGaussian repository
+      - name: Clone CityGaussian
         run: |
+          set -eux
           git clone https://github.com/DekuLiuTesla/CityGaussian.git
           cd CityGaussian
           git rev-parse HEAD
-          echo "===== repository files ====="
           ls -lah
-          echo "===== requirements ====="
           find requirements -maxdepth 2 -type f -name "*.txt" -print || true
 
-      - name: Create conda environment
+      - name: Create conda env
         run: |
+          set -eux
+
           conda create -y -n gspl python=3.10 pip
 
-          GSPL_PREFIX="$(conda info --base)/envs/gspl"
-          echo "GSPL_PREFIX=$GSPL_PREFIX" >> "$GITHUB_ENV"
-          echo "$GSPL_PREFIX/bin" >> "$GITHUB_PATH"
-
+          test -x "$GSPL_PREFIX/bin/python"
           "$GSPL_PREFIX/bin/python" --version
           "$GSPL_PREFIX/bin/python" -m pip --version
 
-      - name: Install system build dependencies
+          echo "$GSPL_PREFIX/bin" >> "$GITHUB_PATH"
+
+      - name: Install system packages
         run: |
+          set -eux
+
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
@@ -74,102 +79,81 @@ jobs:
             libgl1-mesa-dev \
             pkg-config
 
-      - name: Install pip build tools
+      - name: Install Python build tools
         run: |
+          set -eux
+
           "$GSPL_PREFIX/bin/python" -m pip install --upgrade pip setuptools wheel
           "$GSPL_PREFIX/bin/python" -m pip install packaging ninja cmake
 
-      - name: Install PyTorch 2.5.1 CUDA 12.4
+      - name: Install PyTorch CUDA 12.4
         run: |
+          set -eux
+
           "$GSPL_PREFIX/bin/python" -m pip install \
             torch==2.5.1 \
             torchvision==0.20.1 \
             torchaudio==2.5.1 \
             --index-url https://download.pytorch.org/whl/cu124
 
-      - name: Verify PyTorch after install
+      - name: Verify PyTorch
         run: |
-          "$GSPL_PREFIX/bin/python" - <<'EOF'
-          import sys
-          print("Python exe:", sys.executable)
+          set -eux
 
+          "$GSPL_PREFIX/bin/python" - <<'PY'
+          import sys
           import torch
+          import torchvision
+          import torchaudio
+
+          print("Python exe:", sys.executable)
           print("Torch:", torch.__version__)
           print("Torch CUDA:", torch.version.cuda)
           print("CUDA available:", torch.cuda.is_available())
           print("Torch path:", torch.__file__)
-
-          import torchvision
           print("Torchvision:", torchvision.__version__)
-
-          import torchaudio
           print("Torchaudio:", torchaudio.__version__)
-          EOF
+          PY
 
-      - name: Install CUDA Toolkit 12.4 into conda env
+      - name: Install CUDA Toolkit 12.4
         run: |
+          set -eux
+
           conda install -y -n gspl -c nvidia/label/cuda-12.4.0 cuda-toolkit
 
-      - name: Configure CUDA environment variables
-        run: |
-          echo "GSPL_PREFIX=$GSPL_PREFIX" >> "$GITHUB_ENV"
           echo "CUDA_HOME=$GSPL_PREFIX" >> "$GITHUB_ENV"
           echo "CUDA_PATH=$GSPL_PREFIX" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$GSPL_PREFIX/lib:$GSPL_PREFIX/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-
+          echo "LD_LIBRARY_PATH=$GSPL_PREFIX/lib:$GSPL_PREFIX/lib64" >> "$GITHUB_ENV"
           echo "TORCH_CUDA_ARCH_LIST=7.5;8.0;8.6;8.9;9.0" >> "$GITHUB_ENV"
           echo "FORCE_CUDA=1" >> "$GITHUB_ENV"
 
-          echo "$GSPL_PREFIX/bin" >> "$GITHUB_PATH"
-
-      - name: Check CUDA compiler
+      - name: Check nvcc
         run: |
-          echo "GSPL_PREFIX=$GSPL_PREFIX"
-          echo "CUDA_HOME=$CUDA_HOME"
-          echo "CUDA_PATH=$CUDA_PATH"
-          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-          echo "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
+          set -eux
 
-          which nvcc
-          nvcc --version
+          export CUDA_HOME="$GSPL_PREFIX"
+          export CUDA_PATH="$GSPL_PREFIX"
+          export LD_LIBRARY_PATH="$GSPL_PREFIX/lib:$GSPL_PREFIX/lib64"
 
-          "$GSPL_PREFIX/bin/python" - <<'EOF'
+          "$GSPL_PREFIX/bin/nvcc" --version
+
+          "$GSPL_PREFIX/bin/python" - <<'PY'
           import os
           import sys
-          print("Python exe:", sys.executable)
-          print("CUDA_HOME env:", os.environ.get("CUDA_HOME"))
-          print("CUDA_PATH env:", os.environ.get("CUDA_PATH"))
-
           import torch
+          from torch.utils.cpp_extension import CUDA_HOME
+
+          print("Python exe:", sys.executable)
           print("Torch:", torch.__version__)
           print("Torch CUDA:", torch.version.cuda)
-          print("CUDA available:", torch.cuda.is_available())
-
-          from torch.utils.cpp_extension import CUDA_HOME
+          print("CUDA_HOME env:", os.environ.get("CUDA_HOME"))
           print("torch cpp_extension CUDA_HOME:", CUDA_HOME)
-          EOF
+          PY
 
-      - name: Show original requirements
+      - name: Create safe requirements
         run: |
-          cd CityGaussian
+          set -eux
 
-          echo "===== requirements.txt ====="
-          cat requirements.txt || true
-
-          echo ""
-          echo "===== requirements/common.txt ====="
-          cat requirements/common.txt || true
-
-          echo ""
-          echo "===== requirements/lightning23.txt ====="
-          cat requirements/lightning23.txt || true
-
-          echo ""
-          echo "===== requirements/CityGS.txt ====="
-          cat requirements/CityGS.txt || true
-
-      - name: Create safe filtered requirements
-        run: |
           cd CityGaussian
 
           rm -rf /tmp/citygaussian-safe-req
@@ -181,10 +165,10 @@ jobs:
           find /tmp/citygaussian-safe-req -type f -name "*.txt" -print0 | while IFS= read -r -d '' f; do
             echo "Sanitizing $f"
 
-            # 1. Remove PyTorch packages to avoid overwriting torch 2.5.1 cu124
+            # 不允许 requirements 覆盖 torch
             sed -i -E '/^[[:space:]]*(torch|torchvision|torchaudio)([=<>!~ ;]|$)/Id' "$f"
 
-            # 2. Remove common CUDA/C++ extension packages
+            # 删除容易炸的 CUDA/C++ 扩展
             sed -i -E '/diff-gaussian-rasterization/Id' "$f"
             sed -i -E '/simple-knn/Id' "$f"
             sed -i -E '/diff-surfel-rasterization/Id' "$f"
@@ -198,48 +182,32 @@ jobs:
             sed -i -E '/nvdiffrast/Id' "$f"
             sed -i -E '/kaolin/Id' "$f"
 
-            # 3. Remove all git source installs
+            # 删除所有 git 源码安装
             sed -i -E '/git\+https?:\/\//Id' "$f"
 
-            # 4. Remove local submodule/source extension paths if any
+            # 删除本地源码扩展
             sed -i -E '/submodules\//Id' "$f"
             sed -i -E '/\.\/submodules\//Id' "$f"
 
-            # 5. Remove empty/comment-only noise is not necessary, but okay
+            # 删除空行
             sed -i -E '/^[[:space:]]*$/d' "$f"
           done
 
           echo "===== sanitized requirements.txt ====="
           cat /tmp/citygaussian-safe-req/requirements.txt || true
 
-          echo ""
-          echo "===== sanitized requirements/common.txt ====="
+          echo "===== sanitized common.txt ====="
           cat /tmp/citygaussian-safe-req/requirements/common.txt || true
 
-          echo ""
-          echo "===== sanitized requirements/lightning23.txt ====="
+          echo "===== sanitized lightning23.txt ====="
           cat /tmp/citygaussian-safe-req/requirements/lightning23.txt || true
 
-          echo ""
-          echo "===== sanitized requirements/CityGS.txt ====="
+          echo "===== sanitized CityGS.txt ====="
           cat /tmp/citygaussian-safe-req/requirements/CityGS.txt || true
 
-          echo ""
-          echo "===== all sanitized requirement files ====="
-          find /tmp/citygaussian-safe-req -type f -name "*.txt" -print
-
-      - name: Install safe main requirements only
+      - name: Install safe requirements
         run: |
-          echo "===== verify python path before pip install ====="
-          "$GSPL_PREFIX/bin/python" -c "import sys; print(sys.executable)"
-
-          echo "===== verify torch before pip install ====="
-          "$GSPL_PREFIX/bin/python" - <<'EOF'
-          import torch
-          print("Torch:", torch.__version__)
-          print("Torch CUDA:", torch.version.cuda)
-          print("Torch path:", torch.__file__)
-          EOF
+          set -eux
 
           cat > /tmp/torch-constraints.txt <<'EOF'
           torch==2.5.1
@@ -251,46 +219,18 @@ jobs:
             -c /tmp/torch-constraints.txt \
             -r /tmp/citygaussian-safe-req/requirements.txt
 
-      - name: Verify PyTorch after safe main requirements
-        run: |
-          "$GSPL_PREFIX/bin/python" - <<'EOF'
-          import sys
-          print("Python exe:", sys.executable)
-
-          import torch
-          print("Torch:", torch.__version__)
-          print("Torch CUDA:", torch.version.cuda)
-          print("CUDA available:", torch.cuda.is_available())
-          print("Torch path:", torch.__file__)
-
-          import torchvision
-          print("Torchvision:", torchvision.__version__)
-
-          import torchaudio
-          print("Torchaudio:", torchaudio.__version__)
-          EOF
-
-      - name: Install safe CityGaussian additional requirements only
-        run: |
           if [ -f /tmp/citygaussian-safe-req/requirements/CityGS.txt ]; then
-            cat > /tmp/torch-constraints.txt <<'EOF'
-          torch==2.5.1
-          torchvision==0.20.1
-          torchaudio==2.5.1
-          EOF
-
             "$GSPL_PREFIX/bin/python" -m pip install \
               -c /tmp/torch-constraints.txt \
               -r /tmp/citygaussian-safe-req/requirements/CityGS.txt
-          else
-            echo "No CityGS.txt found, skip."
           fi
 
-      - name: Verify final Python environment
+      - name: Verify final env
         run: |
-          "$GSPL_PREFIX/bin/python" - <<'EOF'
+          set -eux
+
+          "$GSPL_PREFIX/bin/python" - <<'PY'
           import sys
-          print("Python:", sys.version)
           print("Python exe:", sys.executable)
 
           import torch
@@ -309,45 +249,44 @@ jobs:
               import lightning
               print("Lightning:", lightning.__version__)
           except Exception as e:
-              print("Lightning import failed:", repr(e))
+              print("Lightning failed:", repr(e))
 
           try:
               import pytorch_lightning
               print("PyTorch Lightning:", pytorch_lightning.__version__)
           except Exception as e:
-              print("PyTorch Lightning import failed:", repr(e))
+              print("PyTorch Lightning failed:", repr(e))
 
           try:
               import numpy
               print("NumPy:", numpy.__version__)
           except Exception as e:
-              print("NumPy import failed:", repr(e))
+              print("NumPy failed:", repr(e))
 
           try:
               import cv2
               print("OpenCV:", cv2.__version__)
           except Exception as e:
-              print("OpenCV import failed:", repr(e))
-          EOF
+              print("OpenCV failed:", repr(e))
+          PY
 
-      - name: Freeze final environment
+      - name: Freeze pip packages
         run: |
-          "$GSPL_PREFIX/bin/python" -m pip freeze | tee citygaussian-gspl-ubuntu2404-cu124-torch251-safe-pip-freeze.txt
+          set -eux
+          "$GSPL_PREFIX/bin/python" -m pip freeze | tee citygaussian-safe-pip-freeze.txt
 
-      - name: Create post-install script for CUDA extensions
+      - name: Create after-restore CUDA extension installer
         run: |
-          cat > install-citygaussian-cuda-extensions-after-restore.sh <<'EOF'
+          set -eux
+
+          cat > install-cuda-extensions-after-restore.sh <<'EOF'
           #!/usr/bin/env bash
-          set -e
-
-          echo "This script should be run on a real NVIDIA GPU machine after restoring the environment."
-          echo ""
+          set -eux
 
           if [ -z "${CONDA_PREFIX:-}" ]; then
-            echo "ERROR: please activate the restored gspl environment first."
-            echo "Example:"
-            echo "  source gspl/bin/activate"
-            echo "  conda-unpack"
+            echo "Please activate the restored env first:"
+            echo "source gspl/bin/activate"
+            echo "conda-unpack"
             exit 1
           fi
 
@@ -356,17 +295,11 @@ jobs:
           export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CONDA_PREFIX/lib64:${LD_LIBRARY_PATH:-}"
           export FORCE_CUDA=1
 
-          # Change this according to your GPU:
-          # RTX 4090: 8.9
-          # RTX 3090: 8.6
-          # A100: 8.0
-          # H100: 9.0
+          # 4090 = 8.9
+          # 3090 = 8.6
+          # A100 = 8.0
+          # H100 = 9.0
           export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.9}"
-
-          echo "CONDA_PREFIX=$CONDA_PREFIX"
-          echo "CUDA_HOME=$CUDA_HOME"
-          echo "CUDA_PATH=$CUDA_PATH"
-          echo "TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
 
           python - <<'PY'
           import torch
@@ -375,105 +308,106 @@ jobs:
           print("CUDA available:", torch.cuda.is_available())
           PY
 
-          echo ""
-          echo "Install diff-gaussian-rasterization..."
           python -m pip install --no-build-isolation \
             git+https://github.com/graphdeco-inria/diff-gaussian-rasterization.git@59f5f77e3ddbac3ed9db93ec2cfe99ed6c5d121d
 
-          echo ""
-          echo "Install simple-knn..."
           python -m pip install --no-build-isolation \
             git+https://gitlab.inria.fr/bkerbl/simple-knn.git
-
-          echo ""
-          echo "Done."
           EOF
 
-          chmod +x install-citygaussian-cuda-extensions-after-restore.sh
-          ls -lh install-citygaussian-cuda-extensions-after-restore.sh
+          chmod +x install-cuda-extensions-after-restore.sh
 
       - name: Install conda-pack
         run: |
+          set -eux
           conda install -y -n base conda-pack
 
-      - name: Pack conda environment
+      - name: Pack env
         run: |
+          set -eux
+
           conda pack -n gspl \
-            -o citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz \
+            -o citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz \
             --ignore-missing-files
 
-          ls -lh citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz
+          ls -lh citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz
 
-      - name: Save CityGaussian source code
+      - name: Pack CityGaussian source
         run: |
+          set -eux
+
           tar --exclude='.git' -czf CityGaussian-source.tar.gz CityGaussian
           ls -lh CityGaussian-source.tar.gz
 
-      - name: Split environment package into 10 parts
+      - name: Split package
         run: |
+          set -eux
+
           split -n 10 -d -a 2 \
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz \
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.part-
+            citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz \
+            citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.part-
 
-          ls -lh citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.part-*
+          ls -lh citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.part-*
 
-      - name: Generate SHA256 checksums
+      - name: Generate sha256
         run: |
-          sha256sum citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz \
-            > citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.sha256
+          set -eux
 
-          sha256sum citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.part-* \
-            > citygaussian-gspl-ubuntu2404-cu124-torch251-safe.parts.sha256
+          sha256sum citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz \
+            > citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.sha256
+
+          sha256sum citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.part-* \
+            > citygaussian-safe-ubuntu2404-cu124-torch251.parts.sha256
 
           sha256sum CityGaussian-source.tar.gz \
             > CityGaussian-source.tar.gz.sha256
 
-          sha256sum citygaussian-gspl-ubuntu2404-cu124-torch251-safe-pip-freeze.txt \
-            > citygaussian-gspl-ubuntu2404-cu124-torch251-safe-pip-freeze.txt.sha256
+          sha256sum citygaussian-safe-pip-freeze.txt \
+            > citygaussian-safe-pip-freeze.txt.sha256
 
-          sha256sum install-citygaussian-cuda-extensions-after-restore.sh \
-            > install-citygaussian-cuda-extensions-after-restore.sh.sha256
+          sha256sum install-cuda-extensions-after-restore.sh \
+            > install-cuda-extensions-after-restore.sh.sha256
 
       - name: Create release tag
         id: tag
         run: |
-          TAG="citygaussian-env-ubuntu2404-cu124-torch251-safe-${GITHUB_RUN_NUMBER}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG"
+          set -eux
 
-      - name: Create GitHub Release and upload files
+          TAG="citygaussian-safe-ubuntu2404-cu124-torch251-${GITHUB_RUN_NUMBER}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -eux
+
           TAG="${{ steps.tag.outputs.tag }}"
 
           gh release create "$TAG" \
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.part-* \
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.sha256 \
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.parts.sha256 \
+            citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.part-* \
+            citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.sha256 \
+            citygaussian-safe-ubuntu2404-cu124-torch251.parts.sha256 \
             CityGaussian-source.tar.gz \
             CityGaussian-source.tar.gz.sha256 \
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe-pip-freeze.txt \
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe-pip-freeze.txt.sha256 \
-            install-citygaussian-cuda-extensions-after-restore.sh \
-            install-citygaussian-cuda-extensions-after-restore.sh.sha256 \
-            --title "CityGaussian Ubuntu24.04 CUDA12.4 PyTorch2.5.1 Safe $TAG" \
-            --notes "CityGaussian safe conda environment.
+            citygaussian-safe-pip-freeze.txt \
+            citygaussian-safe-pip-freeze.txt.sha256 \
+            install-cuda-extensions-after-restore.sh \
+            install-cuda-extensions-after-restore.sh.sha256 \
+            --title "CityGaussian Safe Ubuntu24.04 CUDA12.4 Torch2.5.1" \
+            --notes "Safe CityGaussian environment.
 
-          Build config:
+          Included:
 
           - Ubuntu 24.04
           - Python 3.10
-          - CUDA Toolkit 12.4
           - PyTorch 2.5.1 CUDA 12.4
           - Torchvision 0.20.1
           - Torchaudio 2.5.1
+          - CUDA Toolkit 12.4
+          - Safe Python dependencies
 
-          Important:
-
-          This safe package intentionally does not install CUDA extension packages during GitHub Actions build.
-
-          Skipped CUDA/source extension packages include:
+          Not included during GitHub Actions build:
 
           - diff-gaussian-rasterization
           - simple-knn
@@ -481,19 +415,16 @@ jobs:
           - fused-ssim
           - pytorch3d
           - tiny-cuda-nn
-          - diff-surfel-rasterization
-          - diff-accel-rasterization
-          - git+https source packages
+          - other git/CUDA extension packages
 
           Restore:
 
           \`\`\`bash
-          cat citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.part-* > citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz
-
-          sha256sum -c citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.sha256
+          cat citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.part-* > citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz
+          sha256sum -c citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.sha256
 
           mkdir -p gspl
-          tar -xzf citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz -C gspl
+          tar -xzf citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz -C gspl
 
           source gspl/bin/activate
           conda-unpack
@@ -501,51 +432,28 @@ jobs:
           python -c \"import torch; print(torch.__version__); print(torch.version.cuda)\"
           \`\`\`
 
-          Optional CUDA extensions install on real NVIDIA GPU machine:
+          Optional CUDA extensions on real GPU machine:
 
           \`\`\`bash
           source gspl/bin/activate
           conda-unpack
 
           export TORCH_CUDA_ARCH_LIST=\"8.9\"
-          bash install-citygaussian-cuda-extensions-after-restore.sh
+          bash install-cuda-extensions-after-restore.sh
           \`\`\`
-
-          GPU arch examples:
-
-          - RTX 4090: 8.9
-          - RTX 3090: 8.6
-          - A100: 8.0
-          - H100: 9.0
           "
 
       - name: Upload artifact backup
         uses: actions/upload-artifact@v4
         with:
-          name: citygaussian-env-ubuntu2404-cu124-torch251-safe-parts
+          name: citygaussian-safe-env
           path: |
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.part-*
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.tar.gz.sha256
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe.parts.sha256
+            citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.part-*
+            citygaussian-safe-ubuntu2404-cu124-torch251.tar.gz.sha256
+            citygaussian-safe-ubuntu2404-cu124-torch251.parts.sha256
             CityGaussian-source.tar.gz
             CityGaussian-source.tar.gz.sha256
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe-pip-freeze.txt
-            citygaussian-gspl-ubuntu2404-cu124-torch251-safe-pip-freeze.txt.sha256
-            install-citygaussian-cuda-extensions-after-restore.sh
-            install-citygaussian-cuda-extensions-after-restore.sh.sha256
-
-      - name: Print download link
-        run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-
-          echo "## Download Link" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "Release page:" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "https://github.com/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
-          echo "Artifact backup page:" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
+            citygaussian-safe-pip-freeze.txt
+            citygaussian-safe-pip-freeze.txt.sha256
+            install-cuda-extensions-after-restore.sh
+            install-cuda-extensions-after-restore.sh.sha256
