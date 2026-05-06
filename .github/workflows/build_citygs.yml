@@ -55,13 +55,13 @@ jobs:
           echo "===== requirements/pyt251_cu124.txt ====="
           cat requirements/pyt251_cu124.txt || true
 
-      - name: Install PyTorch 2.0.1 CUDA 11.8 explicitly
+      - name: Install PyTorch 2.5.1 CUDA 12.4 explicitly
         run: |
           conda run -n gspl python -m pip install \
-            torch==2.0.1 \
-            torchvision==0.15.2 \
-            torchaudio==2.0.2 \
-            --index-url https://download.pytorch.org/whl/cu118
+            torch==2.5.1 \
+            torchvision==0.20.* \
+            torchaudio==2.5.* \
+            --index-url https://download.pytorch.org/whl/cu124
 
       - name: Verify PyTorch after install
         run: |
