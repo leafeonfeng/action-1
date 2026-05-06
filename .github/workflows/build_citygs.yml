@@ -103,20 +103,42 @@ jobs:
           echo "Installed packages:"
           pip list
 
-      - name: Package environment
+      - name: Package environment and split into 2 parts
         shell: bash -el {0}
         run: |
           ENV_DIR="${MAMBA_ROOT_PREFIX}/envs/gspl"
 
+          echo "Packing environment..."
           tar -czf gspl-ubuntu2404-python39-cu124.tar.gz -C "${ENV_DIR}" .
 
+          echo "Original package size:"
           ls -lh gspl-ubuntu2404-python39-cu124.tar.gz
 
-      - name: Upload environment artifact
+          echo "Splitting into 2 parts..."
+          mkdir -p split_artifacts
+
+          split \
+            -n 2 \
+            -d \
+            -a 1 \
+            gspl-ubuntu2404-python39-cu124.tar.gz \
+            split_artifacts/gspl-ubuntu2404-python39-cu124.tar.gz.part-
+
+          echo "Split files:"
+          ls -lh split_artifacts/
+
+      - name: Upload environment artifact part 0
         uses: actions/upload-artifact@v4
         with:
-          name: gspl-ubuntu2404-python39-cu124
-          path: gspl-ubuntu2404-python39-cu124.tar.gz
+          name: gspl-ubuntu2404-python39-cu124-part-0
+          path: split_artifacts/gspl-ubuntu2404-python39-cu124.tar.gz.part-0
+          retention-days: 7
+
+      - name: Upload environment artifact part 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: gspl-ubuntu2404-python39-cu124-part-1
+          path: split_artifacts/gspl-ubuntu2404-python39-cu124.tar.gz.part-1
           retention-days: 7
 
       - name: Add download link to summary
@@ -124,7 +146,7 @@ jobs:
         run: |
           echo "## CityGaussian Environment Download" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "环境已经构建完成，并打包为 GitHub Actions Artifact。" >> "$GITHUB_STEP_SUMMARY"
+          echo "环境已经构建完成，并拆分为 2 个 GitHub Actions Artifact。" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "系统环境：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -136,6 +158,14 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Artifact 名称：" >> "$GITHUB_STEP_SUMMARY"
+          echo "需要下载下面两个 Artifact：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`gspl-ubuntu2404-python39-cu124\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. \`gspl-ubuntu2404-python39-cu124-part-0\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "2. \`gspl-ubuntu2404-python39-cu124-part-1\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "下载后需要合并：" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
+          echo "cat gspl-ubuntu2404-python39-cu124.tar.gz.part-0 gspl-ubuntu2404-python39-cu124.tar.gz.part-1 > gspl-ubuntu2404-python39-cu124.tar.gz" >> "$GITHUB_STEP_SUMMARY"
+          echo "tar -xzf gspl-ubuntu2404-python39-cu124.tar.gz -C ./gspl" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
