@@ -3,9 +3,16 @@ name: Build CityGaussian Environment
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-env:
     runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        shell: bash -el {0}
 
     steps:
       - name: Checkout current repository
@@ -36,40 +43,78 @@ jobs:
         run: |
           conda create -y -n gspl python=3.9 pip
           conda run -n gspl python --version
-          conda run -n gspl pip --version
+          conda run -n gspl python -m pip --version
 
       - name: Upgrade pip tools
         run: |
-          conda run -n gspl python -m pip install --upgrade pip setuptools wheel
+          conda run -n gspl python -m pip install --upgrade pip setuptools wheel ninja
 
-      - name: Install PyTorch CUDA 11.8 requirements
+      - name: Show PyTorch requirement file
         run: |
           cd CityGaussian
-          conda run -n gspl pip install -r requirements/pyt251_cu124.txt
+          echo "===== requirements/pyt251_cu124.txt ====="
+          cat requirements/pyt251_cu124.txt || true
 
-      - name: Install main requirements
+      - name: Install PyTorch 2.0.1 CUDA 11.8 explicitly
         run: |
-          cd CityGaussian
-          conda run -n gspl pip install -r requirements.txt
+          conda run -n gspl python -m pip install \
+            torch==2.0.1 \
+            torchvision==0.15.2 \
+            torchaudio==2.0.2 \
+            --index-url https://download.pytorch.org/whl/cu118
 
-      - name: Install CityGaussian additional requirements
-        run: |
-          cd CityGaussian
-          conda run -n gspl pip install -r requirements/CityGS.txt
-
-      - name: Test Python environment
+      - name: Verify PyTorch after install
         run: |
           conda run -n gspl python - <<'EOF'
           import sys
           print("Python:", sys.version)
 
+          import torch
+          print("Torch:", torch.__version__)
+          print("Torch CUDA:", torch.version.cuda)
+          print("CUDA available:", torch.cuda.is_available())
+          EOF
+
+      - name: Install main requirements
+        run: |
+          cd CityGaussian
+          conda run -n gspl python -m pip install -r requirements.txt
+
+      - name: Verify PyTorch after main requirements
+        run: |
+          conda run -n gspl python - <<'EOF'
+          import torch
+          print("Torch after requirements.txt:", torch.__version__)
+          print("Torch CUDA:", torch.version.cuda)
+          EOF
+
+      - name: Install CityGaussian additional requirements
+        run: |
+          cd CityGaussian
+          conda run -n gspl python -m pip install -r requirements/CityGS.txt
+
+      - name: Verify final Python environment
+        run: |
+          conda run -n gspl python - <<'EOF'
+          import sys
+          print("Python:", sys.version)
+
+          import torch
+          print("Torch:", torch.__version__)
+          print("Torch CUDA:", torch.version.cuda)
+          print("CUDA available:", torch.cuda.is_available())
+
           try:
-              import torch
-              print("Torch:", torch.__version__)
-              print("CUDA available:", torch.cuda.is_available())
-              print("Torch CUDA:", torch.version.cuda)
+              import torchvision
+              print("Torchvision:", torchvision.__version__)
           except Exception as e:
-              print("Torch import failed:", repr(e))
+              print("Torchvision check failed:", repr(e))
+
+          try:
+              import torchaudio
+              print("Torchaudio:", torchaudio.__version__)
+          except Exception as e:
+              print("Torchaudio check failed:", repr(e))
           EOF
 
       - name: Install conda-pack
@@ -97,9 +142,6 @@ jobs:
           sha256sum citygaussian-gspl-env.tar.gz.part-* > citygaussian-gspl-env.parts.sha256
           sha256sum CityGaussian-source.tar.gz > CityGaussian-source.tar.gz.sha256
 
-          cat citygaussian-gspl-env.tar.gz.sha256
-          cat CityGaussian-source.tar.gz.sha256
-
       - name: Create release tag
         id: tag
         run: |
@@ -122,14 +164,7 @@ jobs:
             --title "CityGaussian Environment $TAG" \
             --notes "CityGaussian conda environment built by GitHub Actions.
 
-          Files:
-
-          - citygaussian-gspl-env.tar.gz.part-00 ~ part-09: conda environment package split into 10 parts
-          - citygaussian-gspl-env.tar.gz.sha256: checksum of merged environment package
-          - citygaussian-gspl-env.parts.sha256: checksum of each part
-          - CityGaussian-source.tar.gz: CityGaussian source code
-
-          Restore on Linux:
+          Download and restore:
 
           \`\`\`bash
           cat citygaussian-gspl-env.tar.gz.part-* > citygaussian-gspl-env.tar.gz
@@ -139,6 +174,8 @@ jobs:
           tar -xzf citygaussian-gspl-env.tar.gz -C gspl
           source gspl/bin/activate
           conda-unpack
+
+          python -c \"import torch; print(torch.__version__); print(torch.version.cuda)\"
           \`\`\`
           "
 
