@@ -78,7 +78,7 @@ jobs:
       - name: Install main requirements
         run: |
           cd CityGaussian
-          conda run -n gspl python -m pip install -r requirements.txt
+          conda run -n gspl python -m pip install --no-build-isolation -r requirements.txt
 
       - name: Verify PyTorch after main requirements
         run: |
