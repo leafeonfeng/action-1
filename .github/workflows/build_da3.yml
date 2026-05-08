@@ -1,4 +1,4 @@
-name: Build Depth-Anything-3 Ubuntu2404 Environment
+name: Build Depth-Anything-3 Ubuntu2404 CUDA128 Environment
 
 on:
   workflow_dispatch:
@@ -71,17 +71,21 @@ jobs:
 
           python -m pip install --upgrade pip setuptools wheel
 
-      - name: Install PyTorch, torchvision and xformers
+      - name: Install PyTorch CUDA 12.8, torchvision and xformers
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
           micromamba activate depthanything3
 
+          # Install CUDA 12.8 PyTorch wheels
           pip install \
-            "torch>=2" \
+            torch \
             torchvision \
-            xformers
+            --index-url https://download.pytorch.org/whl/cu128
+
+          # Install xformers without letting it replace the CUDA 12.8 torch wheel
+          pip install xformers --no-deps
 
       - name: Install Depth-Anything-3 basic editable package
         shell: bash -el {0}
@@ -92,16 +96,6 @@ jobs:
           micromamba activate depthanything3
 
           pip install -e .
-
-      - name: Install gsplat for gaussian head
-        shell: bash -el {0}
-        run: |
-          set -euxo pipefail
-
-          micromamba activate depthanything3
-
-          pip install --no-build-isolation \
-            git+https://github.com/nerfstudio-project/gsplat.git@0b4dddf04cb687367602c01196913cde6a743d70
 
       - name: Install Depth-Anything-3 app extras
         shell: bash -el {0}
@@ -122,57 +116,6 @@ jobs:
           micromamba activate depthanything3
 
           pip install -e ".[all]"
-
-      - name: Show installed environment info
-        shell: bash -el {0}
-        run: |
-          set -euxo pipefail
-
-          micromamba activate depthanything3
-
-          echo "Python version:"
-          python --version
-
-          echo "Pip version:"
-          pip --version
-
-          echo "PyTorch info:"
-          python - << 'EOF'
-          import torch
-          print("torch:", torch.__version__)
-          print("cuda available:", torch.cuda.is_available())
-          print("torch cuda:", torch.version.cuda)
-          EOF
-
-          echo "torchvision info:"
-          python - << 'EOF'
-          try:
-              import torchvision
-              print("torchvision:", torchvision.__version__)
-          except Exception as e:
-              print("torchvision import failed:", repr(e))
-          EOF
-
-          echo "xformers info:"
-          python - << 'EOF'
-          try:
-              import xformers
-              print("xformers:", xformers.__version__)
-          except Exception as e:
-              print("xformers import failed:", repr(e))
-          EOF
-
-          echo "gsplat info:"
-          python - << 'EOF'
-          try:
-              import gsplat
-              print("gsplat imported successfully")
-          except Exception as e:
-              print("gsplat import failed:", repr(e))
-          EOF
-
-          echo "Installed packages:"
-          pip list
 
       - name: Clean caches before packaging
         shell: bash -el {0}
@@ -228,7 +171,7 @@ jobs:
                 -d \
                 -a 2 \
                 - \
-                split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-
+                split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-
 
           echo "Split files:"
           ls -lh split_artifacts/
@@ -236,7 +179,7 @@ jobs:
           echo "Disk after packaging:"
           df -h
 
-          PART_COUNT=$(ls split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-* | wc -l)
+          PART_COUNT=$(ls split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-* | wc -l)
           echo "Part count: ${PART_COUNT}"
 
           echo "${PART_COUNT}" > split_artifacts/PART_COUNT.txt
@@ -244,55 +187,55 @@ jobs:
       - name: Upload environment artifact part 00
         uses: actions/upload-artifact@v4
         with:
-          name: depthanything3-ubuntu2404-python310-part-00
-          path: split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-00
+          name: depthanything3-ubuntu2404-python310-cu128-part-00
+          path: split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-00
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload environment artifact part 01
         uses: actions/upload-artifact@v4
         with:
-          name: depthanything3-ubuntu2404-python310-part-01
-          path: split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-01
+          name: depthanything3-ubuntu2404-python310-cu128-part-01
+          path: split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-01
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload environment artifact part 02
         uses: actions/upload-artifact@v4
         with:
-          name: depthanything3-ubuntu2404-python310-part-02
-          path: split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-02
+          name: depthanything3-ubuntu2404-python310-cu128-part-02
+          path: split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-02
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload environment artifact part 03
         uses: actions/upload-artifact@v4
         with:
-          name: depthanything3-ubuntu2404-python310-part-03
-          path: split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-03
+          name: depthanything3-ubuntu2404-python310-cu128-part-03
+          path: split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-03
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload environment artifact part 04
         uses: actions/upload-artifact@v4
         with:
-          name: depthanything3-ubuntu2404-python310-part-04
-          path: split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-04
+          name: depthanything3-ubuntu2404-python310-cu128-part-04
+          path: split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-04
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload environment artifact part 05
         uses: actions/upload-artifact@v4
         with:
-          name: depthanything3-ubuntu2404-python310-part-05
-          path: split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-05
+          name: depthanything3-ubuntu2404-python310-cu128-part-05
+          path: split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-05
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload part count
         uses: actions/upload-artifact@v4
         with:
-          name: depthanything3-ubuntu2404-python310-part-count
+          name: depthanything3-ubuntu2404-python310-cu128-part-count
           path: split_artifacts/PART_COUNT.txt
           retention-days: 7
 
@@ -305,52 +248,58 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "环境已经构建完成，并拆分为多个 GitHub Actions Artifact。" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "源码仓库：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "https://github.com/ByteDance-Seed/Depth-Anything-3" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "系统环境：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Ubuntu 24.04" >> "$GITHUB_STEP_SUMMARY"
           echo "- Python 3.10" >> "$GITHUB_STEP_SUMMARY"
-          echo "- torch >= 2" >> "$GITHUB_STEP_SUMMARY"
-          echo "- torchvision" >> "$GITHUB_STEP_SUMMARY"
-          echo "- xformers" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PyTorch CUDA 12.8 wheel" >> "$GITHUB_STEP_SUMMARY"
+          echo "- torchvision CUDA 12.8 wheel" >> "$GITHUB_STEP_SUMMARY"
+          echo "- xformers installed with --no-deps" >> "$GITHUB_STEP_SUMMARY"
           echo "- Depth-Anything-3 editable install" >> "$GITHUB_STEP_SUMMARY"
           echo "- Depth-Anything-3 [app] extras" >> "$GITHUB_STEP_SUMMARY"
           echo "- Depth-Anything-3 [all] extras" >> "$GITHUB_STEP_SUMMARY"
-          echo "- gsplat commit: 0b4dddf04cb687367602c01196913cde6a743d70" >> "$GITHUB_STEP_SUMMARY"
+          echo "- gsplat: not installed" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "下载入口：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "实际分片数量：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "\`${PART_COUNT}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "请下载实际存在的这些 Artifact：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          for f in split_artifacts/depthanything3-ubuntu2404-python310.tar.gz.part-*; do
+          for f in split_artifacts/depthanything3-ubuntu2404-python310-cu128.tar.gz.part-*; do
             base="$(basename "$f")"
             part="${base##*.part-}"
-            echo "- \`depthanything3-ubuntu2404-python310-part-${part}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- \`depthanything3-ubuntu2404-python310-cu128-part-${part}\`" >> "$GITHUB_STEP_SUMMARY"
           done
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "下载后，先把每个 GitHub Artifact zip 解压，得到这些分片文件。" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "合并命令：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
-          echo "cat depthanything3-ubuntu2404-python310.tar.gz.part-* > depthanything3-ubuntu2404-python310.tar.gz" >> "$GITHUB_STEP_SUMMARY"
+          echo "cat depthanything3-ubuntu2404-python310-cu128.tar.gz.part-* > depthanything3-ubuntu2404-python310-cu128.tar.gz" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+
           echo "解压命令：" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
           echo "mkdir -p depthanything3-env" >> "$GITHUB_STEP_SUMMARY"
-          echo "tar -xzf depthanything3-ubuntu2404-python310.tar.gz -C ./depthanything3-env" >> "$GITHUB_STEP_SUMMARY"
+          echo "tar -xzf depthanything3-ubuntu2404-python310-cu128.tar.gz -C ./depthanything3-env" >> "$GITHUB_STEP_SUMMARY"
           echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
-
