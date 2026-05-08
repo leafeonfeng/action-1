@@ -97,16 +97,6 @@ jobs:
 
           pip install -e .
 
-      - name: Install Depth-Anything-3 all extras
-        shell: bash -el {0}
-        working-directory: Depth-Anything-3
-        run: |
-          set -euxo pipefail
-
-          micromamba activate depthanything3
-
-          pip install -e ".[all]"
-
       - name: Clean caches before packaging
         shell: bash -el {0}
         run: |
