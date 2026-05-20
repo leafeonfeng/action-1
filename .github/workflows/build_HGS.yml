@@ -79,6 +79,10 @@ jobs:
         run: |
           conda install -n base -c conda-forge conda-pack -y
 
+          echo "Check conda-pack:"
+          which conda-pack
+          conda-pack --version
+
       - name: Check HorizonGS environment
         shell: bash -el {0}
         run: |
@@ -111,7 +115,10 @@ jobs:
       - name: Pack HorizonGS environment with conda-pack
         shell: bash -el {0}
         run: |
-          conda pack -n HorizonGS -o HorizonGS.tar.gz
+          which conda-pack
+          conda-pack --version
+
+          conda-pack -n HorizonGS -o HorizonGS.tar.gz
 
           echo "Packed file:"
           ls -lh HorizonGS.tar.gz
