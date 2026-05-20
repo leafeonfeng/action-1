@@ -126,14 +126,14 @@ jobs:
           echo "CONDA=$CONDA"
 
           echo "Install conda-pack into base by pip:"
-          "$CONDA/bin/python" -m pip install --upgrade pip
           "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
 
           echo "Check conda-pack module:"
           "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
 
           echo "Check conda-pack executable:"
-          "$CONDA/bin/python" -m conda_pack --version
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
 
       - name: Clean caches before packing
         shell: bash -el {0}
@@ -179,7 +179,7 @@ jobs:
           "$CONDA/bin/conda" run -n horizon_gs python -V
 
           echo "Using conda-pack:"
-          "$CONDA/bin/python" -m conda_pack --version
+          "$CONDA/bin/conda-pack" --version
 
           echo "Create FIFO pipe:"
           rm -f horizon_gs.tar.gz.pipe
@@ -190,7 +190,7 @@ jobs:
           SPLIT_PID=$!
 
           echo "Start conda-pack writer:"
-          "$CONDA/bin/python" -m conda_pack \
+          "$CONDA/bin/conda-pack" \
             -n horizon_gs \
             -o horizon_gs.tar.gz.pipe \
             --ignore-missing-files
