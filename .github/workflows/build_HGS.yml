@@ -78,11 +78,9 @@ jobs:
         shell: bash -el {0}
         run: |
           conda install -n base -c conda-forge conda-pack -y
-
-          echo "Check conda-pack:"
-          which conda-pack
-          conda-pack --version
-
+          echo "Check conda-pack from base:"
+          conda run -n base conda-pack --version
+          
       - name: Check HorizonGS environment
         shell: bash -el {0}
         run: |
