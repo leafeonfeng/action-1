@@ -1,0 +1,134 @@
+name: Build HorizonGS Conda Env
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: true
+          activate-environment: HorizonGS
+          environment-file: environment.yml
+
+      - name: Install conda-pack
+        shell: bash -el {0}
+        run: |
+          conda install -n base -c conda-forge conda-pack -y
+
+      - name: Check environment
+        shell: bash -el {0}
+        run: |
+          conda activate HorizonGS
+
+          echo "Python:"
+          python -V
+
+          echo "Pip:"
+          python -m pip --version
+
+          echo "PyTorch:"
+          python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("cuda available:", torch.cuda.is_available())
+          PY
+
+          echo "nvcc:"
+          which nvcc || true
+          nvcc -V || true
+
+      - name: Pack HorizonGS environment
+        shell: bash -el {0}
+        run: |
+          conda pack -n HorizonGS -o HorizonGS.tar.gz
+
+          ls -lh HorizonGS.tar.gz
+          du -h HorizonGS.tar.gz
+
+      - name: Split package into 1.9GB volumes
+        shell: bash
+        run: |
+          mkdir -p release_parts
+
+          # 1900M < 1.9G，避免 GitHub 单文件过大
+          split -b 1900M -d -a 3 HorizonGS.tar.gz release_parts/HorizonGS.tar.gz.part-
+
+          cd release_parts
+
+          echo "Generated parts:"
+          ls -lh
+
+          sha256sum HorizonGS.tar.gz.part-* > SHA256SUMS.txt
+
+          echo "SHA256:"
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="HorizonGS-env-${GITHUB_RUN_NUMBER}"
+          TITLE="HorizonGS Conda Env ${GITHUB_RUN_NUMBER}"
+
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+          gh release create "$TAG" \
+            --title "$TITLE" \
+            --notes "HorizonGS conda-pack environment split into volumes. Each volume <= 1.9GB."
+
+      - name: Upload split volumes to Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" release_parts/* --clobber
+
+      - name: Print download links
+        shell: bash
+        run: |
+          {
+            echo "## HorizonGS 环境下载链接"
+            echo ""
+            echo "Release:"
+            echo ""
+            echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+            echo ""
+            echo "### 分卷下载"
+            echo ""
+
+            for f in release_parts/*; do
+              name=$(basename "$f")
+              echo "- https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${name}"
+            done
+
+            echo ""
+            echo "### 合并方式"
+            echo ""
+            echo '```bash'
+            echo "cat HorizonGS.tar.gz.part-* > HorizonGS.tar.gz"
+            echo "mkdir -p /root/miniconda3/envs/HorizonGS"
+            echo "tar -xzf HorizonGS.tar.gz -C /root/miniconda3/envs/HorizonGS"
+            echo "/root/miniconda3/envs/HorizonGS/bin/conda-unpack"
+            echo "conda activate HorizonGS"
+            echo '```'
+            echo ""
+            echo "### 校验 SHA256"
+            echo ""
+            echo '```bash'
+            echo "sha256sum -c SHA256SUMS.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
