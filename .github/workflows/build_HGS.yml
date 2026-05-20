@@ -181,25 +181,26 @@ jobs:
           echo "Using conda-pack:"
           "$CONDA/bin/conda-pack" --version
 
-          echo "Create FIFO pipe:"
-          rm -f horizon_gs.tar.gz.pipe
-          mkfifo horizon_gs.tar.gz.pipe
+          echo "Create FIFO pipe with .tar.gz extension:"
+          rm -f horizon_gs.tar.gz
+          mkfifo horizon_gs.tar.gz
 
           echo "Start split reader in background:"
-          split -b 1900M -d -a 3 horizon_gs.tar.gz.pipe release_parts/horizon_gs.tar.gz.part- &
+          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part- &
           SPLIT_PID=$!
 
           echo "Start conda-pack writer:"
           "$CONDA/bin/conda-pack" \
             -n horizon_gs \
-            -o horizon_gs.tar.gz.pipe \
+            -o horizon_gs.tar.gz \
+            --format tar.gz \
             --ignore-missing-files
 
           echo "Wait for split:"
           wait "$SPLIT_PID"
 
           echo "Remove FIFO:"
-          rm -f horizon_gs.tar.gz.pipe
+          rm -f horizon_gs.tar.gz
 
           cd release_parts
 
