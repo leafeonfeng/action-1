@@ -77,9 +77,15 @@ jobs:
       - name: Install conda-pack
         shell: bash -el {0}
         run: |
+          set -euxo pipefail
+
           conda install -n base -c conda-forge conda-pack -y
-          echo "Check conda-pack from base:"
-          conda run -n base conda-pack --version
+
+          echo "Check conda-pack module in base:"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda-pack module version:', conda_pack.__version__)"
+
+          echo "Check conda-pack executable:"
+          ls -lh "$CONDA/bin/conda-pack"
           
       - name: Check HorizonGS environment
         shell: bash -el {0}
@@ -113,10 +119,16 @@ jobs:
       - name: Pack HorizonGS environment with conda-pack
         shell: bash -el {0}
         run: |
-          which conda-pack
-          conda-pack --version
+          set -euxo pipefail
 
-          conda-pack -n HorizonGS -o HorizonGS.tar.gz
+          echo "Confirm HorizonGS Python version:"
+          conda run -n HorizonGS python -V
+
+          echo "Using conda-pack executable:"
+          "$CONDA/bin/conda-pack" --version
+
+          echo "Packing HorizonGS environment..."
+          "$CONDA/bin/conda-pack" -n HorizonGS -o HorizonGS.tar.gz
 
           echo "Packed file:"
           ls -lh HorizonGS.tar.gz
