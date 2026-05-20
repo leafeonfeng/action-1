@@ -152,12 +152,9 @@ jobs:
           rm -rf ~/.cache/huggingface || true
           rm -rf ~/.cache/conda || true
           rm -rf ~/.nv || true
-
-          echo "Remove conda package cache:"
-          rm -rf "$CONDA/pkgs"/* || true
-
-          echo "Do NOT delete files inside $CONDA/envs/horizon_gs"
-          echo "Otherwise conda-pack may report deleted or overwritten conda-managed files."
+          
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/horizon_gs."
 
           echo "horizon_gs env size:"
           du -sh "$CONDA/envs/horizon_gs"
@@ -194,7 +191,8 @@ jobs:
             -n horizon_gs \
             -o horizon_gs.tar.gz \
             --format tar.gz \
-            --ignore-missing-files
+            --ignore-missing-files \
+            --force
 
           echo "Wait for split:"
           wait "$SPLIT_PID"
@@ -213,7 +211,7 @@ jobs:
 
           echo "Disk after pack and split:"
           df -h
-
+          
       - name: Create GitHub Release and upload parts
         uses: softprops/action-gh-release@v2
         with:
