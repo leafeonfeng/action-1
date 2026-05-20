@@ -167,10 +167,13 @@ jobs:
         run: |
           set -exo pipefail
 
-          echo "Disk before pack and split:"
+          echo "Disk before pack:"
           df -h
 
+          rm -rf release_parts
           mkdir -p release_parts
+
+          rm -f horizon_gs.tar.gz
 
           echo "Confirm horizon_gs Python:"
           "$CONDA/bin/conda" run -n horizon_gs python -V
@@ -178,15 +181,7 @@ jobs:
           echo "Using conda-pack:"
           "$CONDA/bin/conda-pack" --version
 
-          echo "Create FIFO pipe with .tar.gz extension:"
-          rm -f horizon_gs.tar.gz
-          mkfifo horizon_gs.tar.gz
-
-          echo "Start split reader in background:"
-          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part- &
-          SPLIT_PID=$!
-
-          echo "Start conda-pack writer:"
+          echo "Packing horizon_gs environment to normal tar.gz file:"
           "$CONDA/bin/conda-pack" \
             -n horizon_gs \
             -o horizon_gs.tar.gz \
@@ -194,10 +189,19 @@ jobs:
             --ignore-missing-files \
             --force
 
-          echo "Wait for split:"
-          wait "$SPLIT_PID"
+          echo "Packed file:"
+          ls -lh horizon_gs.tar.gz
 
-          echo "Remove FIFO:"
+          echo "Disk after pack:"
+          df -h
+
+          echo "Split package:"
+          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
+
+          echo "Generate checksum for full tar.gz:"
+          sha256sum horizon_gs.tar.gz > release_parts/horizon_gs.tar.gz.sha256
+
+          echo "Remove full tar.gz to free disk:"
           rm -f horizon_gs.tar.gz
 
           cd release_parts
@@ -205,11 +209,14 @@ jobs:
           echo "Generated parts:"
           ls -lh
 
-          echo "Generate SHA256SUMS:"
+          echo "Generate SHA256SUMS for parts:"
           sha256sum horizon_gs.tar.gz.part-* > SHA256SUMS.txt
-          cat SHA256SUMS.txt
 
-          echo "Disk after pack and split:"
+          echo "Checksums:"
+          cat SHA256SUMS.txt
+          cat horizon_gs.tar.gz.sha256
+
+          echo "Disk after split:"
           df -h
           
       - name: Create GitHub Release and upload parts
