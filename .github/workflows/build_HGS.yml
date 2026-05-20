@@ -81,13 +81,6 @@ jobs:
           echo "Check Python version:"
           conda run -n horizon_gs python -V
 
-          echo "Check Python executable:"
-          conda run -n horizon_gs python - <<'PY'
-          import sys
-          print("sys.executable:", sys.executable)
-          print("sys.version:", sys.version)
-          PY
-
           echo "Check pip:"
           conda run -n horizon_gs python -m pip --version
 
@@ -102,15 +95,11 @@ jobs:
 
           echo "Check pytorch_scatter:"
           conda run -n horizon_gs python - <<'PY'
-          try:
-              import torch_scatter
-              print("torch_scatter:", torch_scatter.__version__)
-          except Exception as e:
-              print("torch_scatter import failed:", repr(e))
-              raise
+          import torch_scatter
+          print("torch_scatter:", torch_scatter.__version__)
           PY
 
-          echo "Check important pip packages:"
+          echo "Check important packages:"
           conda run -n horizon_gs python - <<'PY'
           import plyfile
           import tensorboard
@@ -137,14 +126,11 @@ jobs:
           echo "Install conda-pack into base:"
           conda install -n base -c conda-forge conda-pack -y
 
-          echo "Check conda-pack module:"
+          echo "Check conda-pack:"
           "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
-
-          echo "Check conda-pack executable:"
-          ls -lh "$CONDA/bin/conda-pack"
           "$CONDA/bin/conda-pack" --version
 
-      - name: Clean conda and pip caches before packing
+      - name: Clean caches before packing
         shell: bash -el {0}
         run: |
           set -euxo pipefail
@@ -155,37 +141,34 @@ jobs:
           echo "Clean conda caches:"
           conda clean -a -y
 
-          echo "Remove user caches:"
+          echo "Remove user caches only:"
           rm -rf ~/.cache/pip || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
           rm -rf ~/.cache/conda || true
           rm -rf ~/.nv || true
 
-          echo "Remove conda package cache manually:"
+          echo "Remove conda package cache:"
           rm -rf "$CONDA/pkgs"/* || true
 
-          echo "Remove pycache files:"
-          find "$CONDA/envs/horizon_gs" -type d -name "__pycache__" -prune -exec rm -rf {} + || true
-          find "$CONDA/envs/horizon_gs" -type f -name "*.pyc" -delete || true
-          find "$CONDA/envs/horizon_gs" -type f -name "*.pyo" -delete || true
+          echo "Do NOT delete files inside $CONDA/envs/horizon_gs"
+          echo "Otherwise conda-pack may report deleted or overwritten conda-managed files."
 
-          echo "Remove static libraries:"
-          find "$CONDA/envs/horizon_gs" -type f -name "*.a" -delete || true
-
-          echo "horizon_gs env size after clean:"
+          echo "horizon_gs env size:"
           du -sh "$CONDA/envs/horizon_gs"
 
           echo "Disk after clean:"
           df -h
 
-      - name: Pack horizon_gs environment with conda-pack
+      - name: Pack and split horizon_gs environment
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
-          echo "Disk before pack:"
+          echo "Disk before pack and split:"
           df -h
+
+          mkdir -p release_parts
 
           echo "Confirm horizon_gs Python:"
           conda run -n horizon_gs python -V
@@ -193,31 +176,25 @@ jobs:
           echo "Using conda-pack:"
           "$CONDA/bin/conda-pack" --version
 
-          echo "Packing horizon_gs environment..."
-          "$CONDA/bin/conda-pack" -n horizon_gs -o horizon_gs.tar.gz
+          echo "Create FIFO pipe:"
+          rm -f horizon_gs.tar.gz.pipe
+          mkfifo horizon_gs.tar.gz.pipe
 
-          echo "Packed file:"
-          ls -lh horizon_gs.tar.gz
-          du -h horizon_gs.tar.gz
+          echo "Start split reader in background:"
+          split -b 1900M -d -a 3 horizon_gs.tar.gz.pipe release_parts/horizon_gs.tar.gz.part- &
+          SPLIT_PID=$!
 
-          echo "Disk after pack:"
-          df -h
+          echo "Start conda-pack writer:"
+          "$CONDA/bin/conda-pack" \
+            -n horizon_gs \
+            -o horizon_gs.tar.gz.pipe \
+            --ignore-missing-files
 
-      - name: Split package into release parts and remove original tar
-        shell: bash
-        run: |
-          set -euxo pipefail
+          echo "Wait for split:"
+          wait "$SPLIT_PID"
 
-          echo "Disk before split:"
-          df -h
-
-          mkdir -p release_parts
-
-          echo "Split horizon_gs.tar.gz into <= 1900MB parts:"
-          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
-
-          echo "Remove original horizon_gs.tar.gz to save disk:"
-          rm -f horizon_gs.tar.gz
+          echo "Remove FIFO:"
+          rm -f horizon_gs.tar.gz.pipe
 
           cd release_parts
 
@@ -228,7 +205,7 @@ jobs:
           sha256sum horizon_gs.tar.gz.part-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-          echo "Disk after split:"
+          echo "Disk after pack and split:"
           df -h
 
       - name: Create GitHub Release and upload parts
@@ -291,6 +268,7 @@ jobs:
             ```bash
             python -V
             python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import torch_scatter; print(torch_scatter.__version__)"
             ```
 
             SHA256 checksums are included in `SHA256SUMS.txt`.
@@ -298,3 +276,4 @@ jobs:
             release_parts/horizon_gs.tar.gz.part-*
             release_parts/SHA256SUMS.txt
           fail_on_unmatched_files: true
+
