@@ -14,6 +14,58 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Create environment.yml
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: HorizonGS
+
+          channels:
+            - pytorch
+            - nvidia
+            - pyg
+            - conda-forge
+            - defaults
+
+          dependencies:
+            - python=3.8.19
+            - pip=24.2
+
+            # PyTorch CUDA 11.8
+            - pytorch=2.1.2
+            - torchvision=0.16.2
+            - torchaudio=2.1.2
+            - pytorch-cuda=11.8
+
+            # nvcc for compiling CUDA extensions
+            - cuda-nvcc=11.8
+
+            # PyG extension
+            - pytorch-scatter
+
+            # Build tools
+            - cmake
+            - ninja
+            - setuptools
+            - wheel
+
+            - pip:
+                - plyfile
+                - tensorboard
+                - tqdm
+                - einops
+                - wandb
+                - lpips
+                - laspy
+                - jaxtyping
+                - colorama
+                - opencv-python
+                - scikit-learn
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -27,10 +79,12 @@ jobs:
         run: |
           conda install -n base -c conda-forge conda-pack -y
 
-      - name: Check environment
+      - name: Check HorizonGS environment
         shell: bash -el {0}
         run: |
           conda activate HorizonGS
+
+          echo "CONDA_PREFIX=$CONDA_PREFIX"
 
           echo "Python:"
           python -V
@@ -38,42 +92,47 @@ jobs:
           echo "Pip:"
           python -m pip --version
 
-          echo "PyTorch:"
+          echo "Conda packages:"
+          conda list | head -n 50
+
+          echo "PyTorch check:"
           python - <<'PY'
           import torch
           print("torch:", torch.__version__)
           print("torch cuda:", torch.version.cuda)
           print("cuda available:", torch.cuda.is_available())
+          print("cuda device count:", torch.cuda.device_count())
           PY
 
-          echo "nvcc:"
+          echo "nvcc check:"
           which nvcc || true
           nvcc -V || true
 
-      - name: Pack HorizonGS environment
+      - name: Pack HorizonGS environment with conda-pack
         shell: bash -el {0}
         run: |
           conda pack -n HorizonGS -o HorizonGS.tar.gz
 
+          echo "Packed file:"
           ls -lh HorizonGS.tar.gz
           du -h HorizonGS.tar.gz
 
-      - name: Split package into 1.9GB volumes
+      - name: Split package into volumes <= 1.9GB
         shell: bash
         run: |
           mkdir -p release_parts
 
-          # 1900M < 1.9G，避免 GitHub 单文件过大
+          # 1900M is safely below 1.9GiB/2GB release asset limits.
           split -b 1900M -d -a 3 HorizonGS.tar.gz release_parts/HorizonGS.tar.gz.part-
 
           cd release_parts
 
-          echo "Generated parts:"
+          echo "Generated split volumes:"
           ls -lh
 
           sha256sum HorizonGS.tar.gz.part-* > SHA256SUMS.txt
 
-          echo "SHA256:"
+          echo "SHA256SUMS:"
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
@@ -88,7 +147,7 @@ jobs:
 
           gh release create "$TAG" \
             --title "$TITLE" \
-            --notes "HorizonGS conda-pack environment split into volumes. Each volume <= 1.9GB."
+            --notes "HorizonGS conda-pack environment for Python 3.8.19, PyTorch 2.1.2, CUDA 11.8. Split into volumes, each <= 1.9GB."
 
       - name: Upload split volumes to Release
         shell: bash
@@ -103,11 +162,11 @@ jobs:
           {
             echo "## HorizonGS 环境下载链接"
             echo ""
-            echo "Release:"
+            echo "Release 页面："
             echo ""
             echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
             echo ""
-            echo "### 分卷下载"
+            echo "### 分卷文件下载"
             echo ""
 
             for f in release_parts/*; do
@@ -116,17 +175,47 @@ jobs:
             done
 
             echo ""
-            echo "### 合并方式"
+            echo "### 下载后合并"
             echo ""
             echo '```bash'
             echo "cat HorizonGS.tar.gz.part-* > HorizonGS.tar.gz"
+            echo '```'
+            echo ""
+            echo "### 解包到 conda 环境目录"
+            echo ""
+            echo '```bash'
             echo "mkdir -p /root/miniconda3/envs/HorizonGS"
             echo "tar -xzf HorizonGS.tar.gz -C /root/miniconda3/envs/HorizonGS"
             echo "/root/miniconda3/envs/HorizonGS/bin/conda-unpack"
+            echo '```'
+            echo ""
+            echo "### 激活环境"
+            echo ""
+            echo '```bash'
             echo "conda activate HorizonGS"
             echo '```'
             echo ""
+            echo "### 测试环境"
+            echo ""
+            echo '```bash'
+            echo "python -V"
+            echo "python -m pip --version"
+            echo "python -c \"import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())\""
+            echo "nvcc -V"
+            echo '```'
+            echo ""
+            echo "### 如果 nvcc 找不到"
+            echo ""
+            echo '```bash'
+            echo "export CUDA_HOME=\$CONDA_PREFIX"
+            echo "export PATH=\$CONDA_PREFIX/bin:\$PATH"
+            echo "export LD_LIBRARY_PATH=\$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH"
+            echo "nvcc -V"
+            echo '```'
+            echo ""
             echo "### 校验 SHA256"
+            echo ""
+            echo "先进入分卷文件所在目录，然后执行："
             echo ""
             echo '```bash'
             echo "sha256sum -c SHA256SUMS.txt"
