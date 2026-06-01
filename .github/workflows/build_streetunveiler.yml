@@ -247,14 +247,31 @@ jobs:
           echo "Packed file:"
           ls -lh streetunveiler.tar.gz
 
-          echo "Disk after pack:"
+          echo "Generate checksum for full tar.gz before deleting env:"
+          sha256sum streetunveiler.tar.gz > release_parts/streetunveiler.tar.gz.sha256
+
+          echo "Disk after pack before deleting env:"
+          df -h
+
+          echo "Delete packed conda environment to free disk before split:"
+          rm -rf "$CONDA/envs/streetunveiler" || true
+
+          echo "Delete conda package cache after conda-pack:"
+          rm -rf "$CONDA/pkgs" || true
+
+          echo "Delete user caches:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "Disk after deleting env and caches:"
           df -h
 
           echo "Split package:"
           split -b 1900M -d -a 3 streetunveiler.tar.gz release_parts/streetunveiler.tar.gz.part-
-
-          echo "Generate checksum for full tar.gz:"
-          sha256sum streetunveiler.tar.gz > release_parts/streetunveiler.tar.gz.sha256
 
           echo "Remove full tar.gz to free disk:"
           rm -f streetunveiler.tar.gz
@@ -273,6 +290,7 @@ jobs:
 
           echo "Disk after split:"
           df -h
+
 
       - name: Create GitHub Release and upload parts
         uses: softprops/action-gh-release@v2
