@@ -1,0 +1,363 @@
+name: Pack streetunveiler Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml and requirements.txt
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: streetunveiler
+          channels:
+            - pytorch
+            - nvidia
+            - conda-forge
+            - defaults
+          dependencies:
+            - python=3.10
+            - pip=24.0
+            - pytorch=2.5.1
+            - torchvision=0.20.1
+            - torchaudio=2.5.1
+            - pytorch-cuda=12.1
+          EOF
+
+          cat > requirements.txt <<'EOF'
+          pytorch-fid
+          tqdm
+          opencv-python
+          omegaconf
+          plyfile
+          lpips
+          pyquaternion
+          matplotlib==3.5.3
+          Cython
+          scikit-learn
+          numpy==1.22.4
+          nuscenes-devkit
+          pykitti
+          tensorboardX
+          tensorboard
+          diffusers==0.27.2
+          albumentations==0.5.2
+          webdataset
+          transformers==4.39.3
+          huggingface_hub==0.20.2
+          easydict
+          pytorch_lightning==1.5.0
+          torchmetrics==0.6.0
+          kornia==0.5.0
+          timm==0.4.12
+          einops
+          open_clip_torch==2.16.0
+          yacs==0.1.8
+          mediapy
+          open3d
+          trimesh
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
+          echo "Generated requirements.txt:"
+          cat requirements.txt
+
+      - name: Setup Miniconda and create streetunveiler environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: streetunveiler
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Install pip requirements
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Check Python and pip before pip install:"
+          conda run -n streetunveiler python -V
+          conda run -n streetunveiler python -m pip --version
+
+          echo "Install requirements.txt:"
+          conda run -n streetunveiler python -m pip install -r requirements.txt
+
+          echo "Disk after pip requirements:"
+          df -h
+
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+          conda info
+          conda env list
+
+          echo "Disk after environment creation:"
+          df -h
+
+          echo "streetunveiler env size:"
+          du -sh "$CONDA/envs/streetunveiler"
+
+      - name: Check streetunveiler environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Check Python version:"
+          conda run -n streetunveiler python -V
+
+          echo "Check pip:"
+          conda run -n streetunveiler python -m pip --version
+
+          echo "Check PyTorch:"
+          conda run -n streetunveiler python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("cuda available:", torch.cuda.is_available())
+          print("cuda device count:", torch.cuda.device_count())
+          PY
+
+          echo "Check torchvision and torchaudio:"
+          conda run -n streetunveiler python - <<'PY'
+          import torchvision
+          import torchaudio
+          print("torchvision:", torchvision.__version__)
+          print("torchaudio:", torchaudio.__version__)
+          PY
+
+          echo "Check important packages:"
+          conda run -n streetunveiler python - <<'PY'
+          import numpy
+          import cv2
+          import sklearn
+          import matplotlib
+          import tqdm
+          import omegaconf
+          import plyfile
+          import lpips
+          import pyquaternion
+          import tensorboard
+          import tensorboardX
+          import diffusers
+          import transformers
+          import huggingface_hub
+          import easydict
+          import pytorch_lightning as pl
+          import torchmetrics
+          import kornia
+          import timm
+          import einops
+          import open_clip
+          import yacs
+          import mediapy
+          import open3d as o3d
+          import trimesh
+
+          print("all important packages imported successfully")
+          PY
+
+      - name: Install conda-pack into base with pip
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Install conda-pack into base by pip:"
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+
+          echo "Check conda-pack module:"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
+
+          echo "Check conda-pack executable:"
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before clean:"
+          df -h
+
+          echo "Clean conda caches:"
+          conda clean -a -y
+
+          echo "Remove user caches only:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/streetunveiler."
+
+          echo "streetunveiler env size:"
+          du -sh "$CONDA/envs/streetunveiler"
+
+          echo "Disk after clean:"
+          df -h
+
+      - name: Pack and split streetunveiler environment
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "Disk before pack:"
+          df -h
+
+          rm -rf release_parts
+          mkdir -p release_parts
+
+          rm -f streetunveiler.tar.gz
+
+          echo "Confirm streetunveiler Python:"
+          "$CONDA/bin/conda" run -n streetunveiler python -V
+
+          echo "Using conda-pack:"
+          "$CONDA/bin/conda-pack" --version
+
+          echo "Packing streetunveiler environment to normal tar.gz file:"
+          "$CONDA/bin/conda-pack" \
+            -n streetunveiler \
+            -o streetunveiler.tar.gz \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          echo "Packed file:"
+          ls -lh streetunveiler.tar.gz
+
+          echo "Disk after pack:"
+          df -h
+
+          echo "Split package:"
+          split -b 1900M -d -a 3 streetunveiler.tar.gz release_parts/streetunveiler.tar.gz.part-
+
+          echo "Generate checksum for full tar.gz:"
+          sha256sum streetunveiler.tar.gz > release_parts/streetunveiler.tar.gz.sha256
+
+          echo "Remove full tar.gz to free disk:"
+          rm -f streetunveiler.tar.gz
+
+          cd release_parts
+
+          echo "Generated parts:"
+          ls -lh
+
+          echo "Generate SHA256SUMS for parts:"
+          sha256sum streetunveiler.tar.gz.part-* > SHA256SUMS.txt
+
+          echo "Checksums:"
+          cat SHA256SUMS.txt
+          cat streetunveiler.tar.gz.sha256
+
+          echo "Disk after split:"
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: streetunveiler-conda-${{ github.run_number }}
+          name: streetunveiler Conda Environment ${{ github.run_number }}
+          body: |
+            streetunveiler Conda environment package.
+
+            Environment name:
+
+            ```text
+            streetunveiler
+            ```
+
+            Python version:
+
+            ```text
+            Python 3.10
+            ```
+
+            Main packages:
+
+            ```text
+            pytorch=2.5.1
+            torchvision=0.20.1
+            torchaudio=2.5.1
+            pytorch-cuda=12.1
+            diffusers=0.27.2
+            transformers=4.39.3
+            huggingface_hub=0.20.2
+            pytorch_lightning=1.5.0
+            open3d
+            ```
+
+            Download all parts and checksum files, then verify parts:
+
+            ```bash
+            sha256sum -c SHA256SUMS.txt
+            ```
+
+            Merge:
+
+            ```bash
+            cat streetunveiler.tar.gz.part-* > streetunveiler.tar.gz
+            ```
+
+            Verify merged tar.gz:
+
+            ```bash
+            sha256sum -c streetunveiler.tar.gz.sha256
+            ```
+
+            Extract:
+
+            ```bash
+            mkdir -p streetunveiler
+            tar -xzf streetunveiler.tar.gz -C streetunveiler
+            ```
+
+            Activate:
+
+            ```bash
+            source streetunveiler/bin/activate
+            ```
+
+            First use after extracting:
+
+            ```bash
+            conda-unpack
+            ```
+
+            Check:
+
+            ```bash
+            python -V
+            python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import diffusers; print(diffusers.__version__)"
+            python -c "import transformers; print(transformers.__version__)"
+            python -c "import open3d as o3d; print(o3d.__version__)"
+            ```
+
+            SHA256 checksums are included in `SHA256SUMS.txt` and `streetunveiler.tar.gz.sha256`.
+          files: |
+            release_parts/streetunveiler.tar.gz.part-*
+            release_parts/SHA256SUMS.txt
+            release_parts/streetunveiler.tar.gz.sha256
+          fail_on_unmatched_files: true
