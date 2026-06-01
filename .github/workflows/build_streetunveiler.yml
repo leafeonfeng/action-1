@@ -271,7 +271,7 @@ jobs:
           df -h
 
           echo "Split package:"
-          split -b 1900M -d -a 3 streetunveiler.tar.gz release_parts/streetunveiler.tar.gz.part-
+          split -b 1000M -d -a 3 streetunveiler.tar.gz release_parts/streetunveiler.tar.gz.part-
 
           echo "Remove full tar.gz to free disk:"
           rm -f streetunveiler.tar.gz
