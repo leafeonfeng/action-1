@@ -1,0 +1,390 @@
+name: Pack waymo_preprocess Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml and requirements.txt
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: waymo_preprocess
+          channels:
+            - conda-forge
+            - defaults
+          dependencies:
+            - python=3.10
+            - pip=24.0
+          EOF
+
+          cat > requirements.txt <<'EOF'
+          opencv-python-headless
+          kornia
+          imagesize
+          omegaconf
+          addict
+          imageio
+          imageio-ffmpeg
+          scikit-image
+          scikit-learn
+          pyyaml
+          pynvml
+          psutil
+          seaborn==0.12.0
+          trimesh
+          plyfile
+          ninja
+          icecream
+          tqdm
+          tensorboard
+          torchmetrics
+          tensorflow_gpu==2.11.0
+          waymo-open-dataset-tf-2-11-0
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
+          echo "Generated requirements.txt:"
+          cat requirements.txt
+
+      - name: Setup Miniconda and create waymo_preprocess environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: waymo_preprocess
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Install PyTorch, torch-scatter and pip requirements
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Check Python and pip before pip install:"
+          conda run -n waymo_preprocess python -V
+          conda run -n waymo_preprocess python -m pip --version
+
+          echo "Upgrade build tools:"
+          conda run -n waymo_preprocess python -m pip install --upgrade pip setuptools wheel
+
+          echo "Install PyTorch CUDA 12.1 wheels:"
+          conda run -n waymo_preprocess python -m pip install \
+            torch==2.1.0 \
+            torchvision==0.16.0 \
+            torchaudio==2.1.0 \
+            --index-url https://download.pytorch.org/whl/cu121
+
+          echo "Install torch-scatter for torch 2.1.0 + CUDA 12.1 + Python 3.10 + Linux x86_64:"
+          conda run -n waymo_preprocess python -m pip install \
+            https://data.pyg.org/whl/torch-2.1.0%2Bcu121/torch_scatter-2.1.2%2Bpt21cu121-cp310-cp310-linux_x86_64.whl
+
+          echo "Install requirements.txt:"
+          conda run -n waymo_preprocess python -m pip install -r requirements.txt
+
+          echo "Disk after pip requirements:"
+          df -h
+
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+          conda info
+          conda env list
+
+          echo "Disk after environment creation:"
+          df -h
+
+          echo "waymo_preprocess env size:"
+          du -sh "$CONDA/envs/waymo_preprocess"
+
+      - name: Check waymo_preprocess environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Check Python version:"
+          conda run -n waymo_preprocess python -V
+
+          echo "Check pip:"
+          conda run -n waymo_preprocess python -m pip --version
+
+          echo "Check PyTorch:"
+          conda run -n waymo_preprocess python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("cuda available:", torch.cuda.is_available())
+          print("cuda device count:", torch.cuda.device_count())
+          PY
+
+          echo "Check torchvision and torchaudio:"
+          conda run -n waymo_preprocess python - <<'PY'
+          import torchvision
+          import torchaudio
+          print("torchvision:", torchvision.__version__)
+          print("torchaudio:", torchaudio.__version__)
+          PY
+
+          echo "Check torch-scatter:"
+          conda run -n waymo_preprocess python - <<'PY'
+          import torch_scatter
+          print("torch_scatter imported successfully")
+          PY
+
+          echo "Check TensorFlow and Waymo:"
+          conda run -n waymo_preprocess python - <<'PY'
+          import tensorflow as tf
+          import waymo_open_dataset
+          print("tensorflow:", tf.__version__)
+          print("waymo_open_dataset imported successfully")
+          PY
+
+          echo "Check important packages:"
+          conda run -n waymo_preprocess python - <<'PY'
+          import cv2
+          import kornia
+          import imagesize
+          import omegaconf
+          import addict
+          import imageio
+          import skimage
+          import sklearn
+          import yaml
+          import pynvml
+          import psutil
+          import seaborn
+          import trimesh
+          import plyfile
+          import ninja
+          import icecream
+          import tqdm
+          import tensorboard
+          import torchmetrics
+
+          print("all important packages imported successfully")
+          PY
+
+      - name: Install conda-pack into base with pip
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Install conda-pack into base by pip:"
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+
+          echo "Check conda-pack module:"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
+
+          echo "Check conda-pack executable:"
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before clean:"
+          df -h
+
+          echo "Clean conda caches:"
+          conda clean -a -y
+
+          echo "Remove user caches only:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/waymo_preprocess."
+
+          echo "waymo_preprocess env size:"
+          du -sh "$CONDA/envs/waymo_preprocess"
+
+          echo "Disk after clean:"
+          df -h
+
+      - name: Pack and split waymo_preprocess environment
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "Disk before pack:"
+          df -h
+
+          rm -rf release_parts
+          mkdir -p release_parts
+
+          rm -f waymo_preprocess.tar.gz
+
+          echo "Confirm waymo_preprocess Python:"
+          "$CONDA/bin/conda" run -n waymo_preprocess python -V
+
+          echo "Using conda-pack:"
+          "$CONDA/bin/conda-pack" --version
+
+          echo "Packing waymo_preprocess environment to normal tar.gz file:"
+          "$CONDA/bin/conda-pack" \
+            -n waymo_preprocess \
+            -o waymo_preprocess.tar.gz \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          echo "Packed file:"
+          ls -lh waymo_preprocess.tar.gz
+
+          echo "Generate checksum for full tar.gz before deleting env:"
+          sha256sum waymo_preprocess.tar.gz > release_parts/waymo_preprocess.tar.gz.sha256
+
+          echo "Disk after pack before deleting env:"
+          df -h
+
+          echo "Delete packed conda environment to free disk before split:"
+          rm -rf "$CONDA/envs/waymo_preprocess" || true
+
+          echo "Delete conda package cache after conda-pack:"
+          rm -rf "$CONDA/pkgs" || true
+
+          echo "Delete user caches:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "Disk after deleting env and caches:"
+          df -h
+
+          echo "Split package:"
+          split -b 1000M -d -a 3 waymo_preprocess.tar.gz release_parts/waymo_preprocess.tar.gz.part-
+
+          echo "Remove full tar.gz to free disk:"
+          rm -f waymo_preprocess.tar.gz
+
+          cd release_parts
+
+          echo "Generated parts:"
+          ls -lh
+
+          echo "Generate SHA256SUMS for parts:"
+          sha256sum waymo_preprocess.tar.gz.part-* > SHA256SUMS.txt
+
+          echo "Checksums:"
+          cat SHA256SUMS.txt
+          cat waymo_preprocess.tar.gz.sha256
+
+          echo "Disk after split:"
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: waymo-preprocess-conda-${{ github.run_number }}
+          name: waymo_preprocess Conda Environment ${{ github.run_number }}
+          body: |
+            waymo_preprocess Conda environment package.
+
+            Environment name:
+
+            ```text
+            waymo_preprocess
+            ```
+
+            Python version:
+
+            ```text
+            Python 3.10
+            ```
+
+            Main packages:
+
+            ```text
+            torch==2.1.0
+            torchvision==0.16.0
+            torchaudio==2.1.0
+            CUDA wheel: cu121
+            torch-scatter==2.1.2+pt21cu121
+            tensorflow_gpu==2.11.0
+            waymo-open-dataset-tf-2-11-0
+            opencv-python-headless
+            kornia
+            torchmetrics
+            tensorboard
+            ```
+
+            Download all parts and checksum files, then verify parts:
+
+            ```bash
+            sha256sum -c SHA256SUMS.txt
+            ```
+
+            Merge:
+
+            ```bash
+            cat waymo_preprocess.tar.gz.part-* > waymo_preprocess.tar.gz
+            ```
+
+            Verify merged tar.gz:
+
+            ```bash
+            sha256sum -c waymo_preprocess.tar.gz.sha256
+            ```
+
+            Extract:
+
+            ```bash
+            mkdir -p waymo_preprocess
+            tar -xzf waymo_preprocess.tar.gz -C waymo_preprocess
+            ```
+
+            Activate:
+
+            ```bash
+            source waymo_preprocess/bin/activate
+            ```
+
+            First use after extracting:
+
+            ```bash
+            conda-unpack
+            ```
+
+            Check:
+
+            ```bash
+            python -V
+            python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import torchvision; print(torchvision.__version__)"
+            python -c "import torch_scatter; print('torch_scatter ok')"
+            python -c "import tensorflow as tf; print(tf.__version__)"
+            python -c "import waymo_open_dataset; print('waymo ok')"
+            ```
+
+            SHA256 checksums are included in `SHA256SUMS.txt` and `waymo_preprocess.tar.gz.sha256`.
+          files: |
+            release_parts/waymo_preprocess.tar.gz.part-*
+            release_parts/SHA256SUMS.txt
+            release_parts/waymo_preprocess.tar.gz.sha256
+          fail_on_unmatched_files: true
