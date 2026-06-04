@@ -1,0 +1,363 @@
+name: Pack segformer Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml and requirements.txt
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: segformer
+          channels:
+            - conda-forge
+            - defaults
+          dependencies:
+            - python=3.8
+            - pip=24.0
+          EOF
+
+          cat > requirements.txt <<'EOF'
+          numpy<2
+          timm==0.3.2
+          pylint
+          debugpy
+          opencv-python-headless
+          attrs
+          ipython
+          tqdm
+          imageio
+          scikit-image
+          omegaconf
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
+          echo "Generated requirements.txt:"
+          cat requirements.txt
+
+      - name: Setup Miniconda and create segformer environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: segformer
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Install PyTorch, requirements and mmcv-full
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Check Python and pip before pip install:"
+          conda run -n segformer python -V
+          conda run -n segformer python -m pip --version
+
+          echo "Upgrade build tools:"
+          conda run -n segformer python -m pip install --upgrade pip setuptools wheel
+
+          echo "Install PyTorch 1.8.1 CUDA 11.1 wheels:"
+          conda run -n segformer python -m pip install \
+            torch==1.8.1+cu111 \
+            torchvision==0.9.1+cu111 \
+            torchaudio==0.8.1 \
+            -f https://download.pytorch.org/whl/torch_stable.html
+
+          echo "Install requirements.txt:"
+          conda run -n segformer python -m pip install -r requirements.txt
+
+          echo "Install mmcv-full 1.2.7:"
+          conda run -n segformer python -m pip install mmcv-full==1.2.7 --no-cache-dir
+
+          echo "Disk after pip requirements:"
+          df -h
+
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+          conda info
+          conda env list
+
+          echo "Disk after environment creation:"
+          df -h
+
+          echo "segformer env size:"
+          du -sh "$CONDA/envs/segformer"
+
+      - name: Check segformer environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Check Python version:"
+          conda run -n segformer python -V
+
+          echo "Check pip:"
+          conda run -n segformer python -m pip --version
+
+          echo "Check PyTorch:"
+          conda run -n segformer python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("cuda available:", torch.cuda.is_available())
+          print("cuda device count:", torch.cuda.device_count())
+          PY
+
+          echo "Check torchvision and torchaudio:"
+          conda run -n segformer python - <<'PY'
+          import torchvision
+          import torchaudio
+          print("torchvision:", torchvision.__version__)
+          print("torchaudio:", torchaudio.__version__)
+          PY
+
+          echo "Check mmcv-full:"
+          conda run -n segformer python - <<'PY'
+          import mmcv
+          print("mmcv:", mmcv.__version__)
+          PY
+
+          echo "Check important packages:"
+          conda run -n segformer python - <<'PY'
+          import numpy
+          import timm
+          import pylint
+          import debugpy
+          import cv2
+          import attr
+          import IPython
+          import tqdm
+          import imageio
+          import skimage
+          import omegaconf
+
+          print("numpy:", numpy.__version__)
+          print("timm:", timm.__version__)
+          print("all important packages imported successfully")
+          PY
+
+      - name: Install conda-pack into base with pip
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Install conda-pack into base by pip:"
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+
+          echo "Check conda-pack module:"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
+
+          echo "Check conda-pack executable:"
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before clean:"
+          df -h
+
+          echo "Clean conda caches:"
+          conda clean -a -y
+
+          echo "Remove user caches only:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/segformer."
+
+          echo "segformer env size:"
+          du -sh "$CONDA/envs/segformer"
+
+          echo "Disk after clean:"
+          df -h
+
+      - name: Pack and split segformer environment
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "Disk before pack:"
+          df -h
+
+          rm -rf release_parts
+          mkdir -p release_parts
+
+          rm -f segformer.tar.gz
+
+          echo "Confirm segformer Python:"
+          "$CONDA/bin/conda" run -n segformer python -V
+
+          echo "Using conda-pack:"
+          "$CONDA/bin/conda-pack" --version
+
+          echo "Packing segformer environment to normal tar.gz file:"
+          "$CONDA/bin/conda-pack" \
+            -n segformer \
+            -o segformer.tar.gz \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          echo "Packed file:"
+          ls -lh segformer.tar.gz
+
+          echo "Generate checksum for full tar.gz before deleting env:"
+          sha256sum segformer.tar.gz > release_parts/segformer.tar.gz.sha256
+
+          echo "Disk after pack before deleting env:"
+          df -h
+
+          echo "Delete packed conda environment to free disk before split:"
+          rm -rf "$CONDA/envs/segformer" || true
+
+          echo "Delete conda package cache after conda-pack:"
+          rm -rf "$CONDA/pkgs" || true
+
+          echo "Delete user caches:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "Disk after deleting env and caches:"
+          df -h
+
+          echo "Split package:"
+          split -b 1000M -d -a 3 segformer.tar.gz release_parts/segformer.tar.gz.part-
+
+          echo "Remove full tar.gz to free disk:"
+          rm -f segformer.tar.gz
+
+          cd release_parts
+
+          echo "Generated parts:"
+          ls -lh
+
+          echo "Generate SHA256SUMS for parts:"
+          sha256sum segformer.tar.gz.part-* > SHA256SUMS.txt
+
+          echo "Checksums:"
+          cat SHA256SUMS.txt
+          cat segformer.tar.gz.sha256
+
+          echo "Disk after split:"
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: segformer-conda-${{ github.run_number }}
+          name: segformer Conda Environment ${{ github.run_number }}
+          body: |
+            segformer Conda environment package.
+
+            Environment name:
+
+            ```text
+            segformer
+            ```
+
+            Python version:
+
+            ```text
+            Python 3.8
+            ```
+
+            Main packages:
+
+            ```text
+            torch==1.8.1+cu111
+            torchvision==0.9.1+cu111
+            torchaudio==0.8.1
+            CUDA wheel: cu111
+            mmcv-full==1.2.7
+            timm==0.3.2
+            opencv-python-headless
+            tqdm
+            imageio
+            scikit-image
+            omegaconf
+            ```
+
+            Download all parts and checksum files, then verify parts:
+
+            ```bash
+            sha256sum -c SHA256SUMS.txt
+            ```
+
+            Merge:
+
+            ```bash
+            cat segformer.tar.gz.part-* > segformer.tar.gz
+            ```
+
+            Verify merged tar.gz:
+
+            ```bash
+            sha256sum -c segformer.tar.gz.sha256
+            ```
+
+            Extract:
+
+            ```bash
+            mkdir -p segformer
+            tar -xzf segformer.tar.gz -C segformer
+            ```
+
+            Activate:
+
+            ```bash
+            source segformer/bin/activate
+            ```
+
+            First use after extracting:
+
+            ```bash
+            conda-unpack
+            ```
+
+            Check:
+
+            ```bash
+            python -V
+            python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import torchvision; print(torchvision.__version__)"
+            python -c "import mmcv; print(mmcv.__version__)"
+            python -c "import timm; print(timm.__version__)"
+            ```
+
+            SHA256 checksums are included in `SHA256SUMS.txt` and `segformer.tar.gz.sha256`.
+          files: |
+            release_parts/segformer.tar.gz.part-*
+            release_parts/SHA256SUMS.txt
+            release_parts/segformer.tar.gz.sha256
+          fail_on_unmatched_files: true
