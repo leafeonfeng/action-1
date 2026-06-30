@@ -1,0 +1,470 @@
+name: Pack stable_normal Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml and requirements.txt
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: stable_normal
+          channels:
+            - conda-forge
+            - defaults
+          dependencies:
+            - python=3.10
+            - pip=24.0
+          EOF
+
+          cat > requirements.txt <<'EOF'
+          accelerate==0.30.1
+          aiofiles==23.2.1
+          aiohttp==3.9.5
+          aiosignal==1.3.1
+          altair==5.3.0
+          annotated-types==0.7.0
+          anyio==4.4.0
+          async-timeout==4.0.3
+          attrs==23.2.0
+          Authlib==1.3.0
+          certifi==2024.2.2
+          cffi==1.16.0
+          charset-normalizer==3.3.2
+          click==8.0.4
+          contourpy==1.2.1
+          cryptography==42.0.7
+          cycler==0.12.1
+          dataclasses-json==0.6.6
+          datasets==2.19.1
+          Deprecated==1.2.14
+          diffusers==0.28.0
+          dill==0.3.8
+          dnspython==2.6.1
+          email_validator==2.1.1
+          exceptiongroup==1.2.1
+          fastapi==0.111.0
+          fastapi-cli==0.0.4
+          ffmpy==0.3.2
+          filelock==3.14.0
+          fonttools==4.53.0
+          frozenlist==1.4.1
+          fsspec==2024.3.1
+          gradio==4.32.2
+          gradio_client==0.17.0
+          gradio_imageslider==0.0.20
+          h11==0.14.0
+          httpcore==1.0.5
+          httptools==0.6.1
+          httpx==0.27.0
+          huggingface-hub==0.23.0
+          idna==3.7
+          imageio==2.34.1
+          imageio-ffmpeg==0.5.0
+          importlib_metadata==7.1.0
+          importlib_resources==6.4.0
+          itsdangerous==2.2.0
+          Jinja2==3.1.4
+          jsonschema==4.22.0
+          jsonschema-specifications==2023.12.1
+          kiwisolver==1.4.5
+          markdown-it-py==3.0.0
+          MarkupSafe==2.1.5
+          marshmallow==3.21.2
+          matplotlib==3.8.2
+          mdurl==0.1.2
+          mpmath==1.3.0
+          multidict==6.0.5
+          multiprocess==0.70.16
+          mypy-extensions==1.0.0
+          networkx==3.3
+          numpy==1.26.4
+          orjson==3.10.3
+          packaging==24.0
+          pandas==2.2.2
+          pillow==10.3.0
+          protobuf==3.20.3
+          psutil==5.9.8
+          pyarrow==16.0.0
+          pyarrow-hotfix==0.6
+          pycparser==2.22
+          pydantic==2.7.2
+          pydantic_core==2.18.3
+          pydub==0.25.1
+          pygltflib==1.16.1
+          Pygments==2.18.0
+          pyparsing==3.1.2
+          python-dateutil==2.9.0.post0
+          python-dotenv==1.0.1
+          python-multipart==0.0.9
+          pytz==2024.1
+          PyYAML==6.0.1
+          referencing==0.35.1
+          regex==2024.5.15
+          requests==2.31.0
+          rich==13.7.1
+          rpds-py==0.18.1
+          ruff==0.4.7
+          safetensors==0.4.3
+          scipy==1.11.4
+          semantic-version==2.10.0
+          shellingham==1.5.4
+          six==1.16.0
+          sniffio==1.3.1
+          spaces==0.28.3
+          starlette==0.37.2
+          sympy==1.12.1
+          tokenizers==0.15.2
+          tomlkit==0.12.0
+          toolz==0.12.1
+          tqdm==4.66.4
+          transformers==4.36.1
+          trimesh==4.0.5
+          typer==0.12.3
+          typing-inspect==0.9.0
+          typing_extensions==4.11.0
+          tzdata==2024.1
+          ujson==5.10.0
+          urllib3==2.2.1
+          uvicorn==0.30.0
+          uvloop==0.19.0
+          watchfiles==0.22.0
+          websockets==11.0.3
+          wrapt==1.16.0
+          xformers==0.0.24
+          xxhash==3.4.1
+          yarl==1.9.4
+          zipp==3.19.1
+          einops==0.7.0
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
+          echo "Generated requirements.txt:"
+          cat requirements.txt
+
+      - name: Setup Miniconda and create stable_normal environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: stable_normal
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Install GPU PyTorch and pip requirements
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Check Python and pip before pip install:"
+          conda run -n stable_normal python -V
+          conda run -n stable_normal python -m pip --version
+
+          echo "Upgrade build tools:"
+          conda run -n stable_normal python -m pip install --upgrade pip setuptools wheel
+
+          echo "Install PyTorch GPU CUDA 12.1 wheel:"
+          conda run -n stable_normal python -m pip install \
+            torch==2.2.0 \
+            --index-url https://download.pytorch.org/whl/cu121
+
+          echo "Check PyTorch immediately after GPU install:"
+          conda run -n stable_normal python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          assert torch.version.cuda is not None, "PyTorch is not a CUDA/GPU build"
+          PY
+
+          echo "Install requirements.txt:"
+          conda run -n stable_normal python -m pip install -r requirements.txt
+
+          echo "Disk after pip requirements:"
+          df -h
+
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+          conda info
+          conda env list
+
+          echo "Disk after environment creation:"
+          df -h
+
+          echo "stable_normal env size:"
+          du -sh "$CONDA/envs/stable_normal"
+
+      - name: Check stable_normal environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Check Python version:"
+          conda run -n stable_normal python -V
+
+          echo "Check pip:"
+          conda run -n stable_normal python -m pip --version
+
+          echo "Check PyTorch GPU wheel:"
+          conda run -n stable_normal python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("cuda available:", torch.cuda.is_available())
+          print("cuda device count:", torch.cuda.device_count())
+          assert torch.version.cuda is not None, "PyTorch is not a CUDA/GPU build"
+          PY
+
+          echo "Check important packages:"
+          conda run -n stable_normal python - <<'PY'
+          import accelerate
+          import aiofiles
+          import aiohttp
+          import altair
+          import anyio
+          import authlib
+          import certifi
+          import cffi
+          import click
+          import cryptography
+          import datasets
+          import diffusers
+          import fastapi
+          import gradio
+          import huggingface_hub
+          import imageio
+          import imageio_ffmpeg
+          import jinja2
+          import jsonschema
+          import matplotlib
+          import numpy
+          import pandas
+          import PIL
+          import psutil
+          import pydantic
+          import pygltflib
+          import requests
+          import rich
+          import safetensors
+          import scipy
+          import starlette
+          import tokenizers
+          import tqdm
+          import transformers
+          import trimesh
+          import typer
+          import uvicorn
+          import websockets
+          import xformers
+          import einops
+
+          print("numpy:", numpy.__version__)
+          print("diffusers:", diffusers.__version__)
+          print("transformers:", transformers.__version__)
+          print("huggingface_hub:", huggingface_hub.__version__)
+          print("gradio:", gradio.__version__)
+          print("xformers:", xformers.__version__)
+          print("all important packages imported successfully")
+          PY
+
+      - name: Install conda-pack into base with pip
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "CONDA=$CONDA"
+
+          echo "Install conda-pack into base by pip:"
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+
+          echo "Check conda-pack module:"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
+
+          echo "Check conda-pack executable:"
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before clean:"
+          df -h
+
+          echo "Clean conda caches:"
+          conda clean -a -y
+
+          echo "Remove user caches only:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/stable_normal."
+
+          echo "stable_normal env size:"
+          du -sh "$CONDA/envs/stable_normal"
+
+          echo "Disk after clean:"
+          df -h
+
+      - name: Pack and split stable_normal environment
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "Disk before pack:"
+          df -h
+
+          rm -rf release_parts
+          mkdir -p release_parts
+
+          rm -f stable_normal.tar.gz
+
+          echo "Confirm stable_normal Python:"
+          "$CONDA/bin/conda" run -n stable_normal python -V
+
+          echo "Using conda-pack:"
+          "$CONDA/bin/conda-pack" --version
+
+          echo "Packing stable_normal environment to normal tar.gz file:"
+          "$CONDA/bin/conda-pack" \
+            -n stable_normal \
+            -o stable_normal.tar.gz \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          echo "Packed file:"
+          ls -lh stable_normal.tar.gz
+
+          echo "Disk after pack before deleting env:"
+          df -h
+
+          echo "Delete packed conda environment to free disk before split:"
+          rm -rf "$CONDA/envs/stable_normal" || true
+
+          echo "Delete conda package cache after conda-pack:"
+          rm -rf "$CONDA/pkgs" || true
+
+          echo "Delete user caches:"
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "Disk after deleting env and caches:"
+          df -h
+
+          echo "Split package:"
+          split -b 1000M -d -a 3 stable_normal.tar.gz release_parts/stable_normal.tar.gz.part-
+
+          echo "Remove full tar.gz to free disk:"
+          rm -f stable_normal.tar.gz
+
+          cd release_parts
+
+          echo "Generated parts:"
+          ls -lh
+
+          echo "Disk after split:"
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: stable-normal-conda-${{ github.run_number }}
+          name: stable_normal Conda Environment ${{ github.run_number }}
+          body: |
+            stable_normal Conda environment package.
+
+            Environment name:
+
+            ```text
+            stable_normal
+            ```
+
+            Python version:
+
+            ```text
+            Python 3.10
+            ```
+
+            Main packages:
+
+            ```text
+            torch==2.2.0
+            CUDA wheel: cu121
+            xformers==0.0.24
+            diffusers==0.28.0
+            transformers==4.36.1
+            accelerate==0.30.1
+            gradio==4.32.2
+            datasets==2.19.1
+            huggingface-hub==0.23.0
+            numpy==1.26.4
+            scipy==1.11.4
+            trimesh==4.0.5
+            einops==0.7.0
+            ```
+
+            Download all parts, then merge:
+
+            ```bash
+            cat stable_normal.tar.gz.part-* > stable_normal.tar.gz
+            ```
+
+            Extract:
+
+            ```bash
+            mkdir -p stable_normal
+            tar -xzf stable_normal.tar.gz -C stable_normal
+            ```
+
+            Activate:
+
+            ```bash
+            source stable_normal/bin/activate
+            ```
+
+            First use after extracting:
+
+            ```bash
+            conda-unpack
+            ```
+
+            Check:
+
+            ```bash
+            python -V
+            python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import xformers; print(xformers.__version__)"
+            python -c "import diffusers; print(diffusers.__version__)"
+            python -c "import transformers; print(transformers.__version__)"
+            python -c "import gradio; print(gradio.__version__)"
+            ```
+          files: |
+            release_parts/stable_normal.tar.gz.part-*
+          fail_on_unmatched_files: true
