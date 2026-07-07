@@ -1,3 +1,4 @@
+```yaml
 name: Pack tdmpc2 Conda Environment
 
 on:
@@ -290,5 +291,3 @@ jobs:
           files: |
             release_parts/tdmpc2.tar.gz.part-*
           fail_on_unmatched_files: true
-```
-
