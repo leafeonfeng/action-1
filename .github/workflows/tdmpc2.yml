@@ -25,12 +25,13 @@ jobs:
             - conda-forge
             - defaults
           dependencies:
+            - python=3.9
+            - pip=24.0
             - glew=2.2.0
             - glib=2.78.4
-            - pip=24.0
-            - python=3.9
             - pytorch=2.6.0.dev20241112
             - pytorch-cuda=12.4
+            - torchvision=0.15.2
           EOF
 
           cat > requirements.txt <<'EOF'
@@ -70,7 +71,7 @@ jobs:
           environment-file: environment.yml
           auto-activate-base: false
 
-      - name: Install pip requirements
+      - name: Install pip requirements and nightly extras
         shell: bash -el {0}
         run: |
           set -euxo pipefail
@@ -84,22 +85,23 @@ jobs:
           echo "Upgrade build tools:"
           conda run -n tdmpc2 python -m pip install --upgrade pip setuptools wheel
 
-          echo "Check PyTorch GPU conda package before pip requirements:"
+          echo "Check PyTorch from conda:"
           conda run -n tdmpc2 python - <<'PY'
           import torch
+          import torchvision
           print("torch:", torch.__version__)
           print("torch cuda:", torch.version.cuda)
           print("cuda available:", torch.cuda.is_available())
-          print("cuda device count:", torch.cuda.device_count())
-          assert torch.version.cuda is not None, "PyTorch is not a CUDA/GPU build"
+          print("torchvision:", torchvision.__version__)
           PY
-
-          echo "Install tensordict-nightly and torchrl-nightly separately:"
-          conda run -n tdmpc2 python -m pip install --pre tensordict-nightly torchrl-nightly \
-            --extra-index-url https://download.pytorch.org/whl/nightly/cu124
 
           echo "Install requirements.txt:"
           conda run -n tdmpc2 python -m pip install -r requirements.txt
+
+          echo "Install tensordict-nightly and torchrl-nightly from PyPI default index:"
+          conda run -n tdmpc2 python -m pip install \
+            tensordict-nightly==2025.1.1 \
+            torchrl-nightly==2025.1.1
 
           echo "Disk after pip requirements:"
           df -h
@@ -118,6 +120,60 @@ jobs:
 
           echo "tdmpc2 env size:"
           du -sh "$CONDA/envs/tdmpc2"
+
+      - name: Check tdmpc2 environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Check Python version:"
+          conda run -n tdmpc2 python -V
+
+          echo "Check pip:"
+          conda run -n tdmpc2 python -m pip --version
+
+          echo "Check PyTorch GPU build:"
+          conda run -n tdmpc2 python - <<'PY'
+          import torch
+          print("torch:", torch.__version__)
+          print("torch cuda:", torch.version.cuda)
+          print("cuda available:", torch.cuda.is_available())
+          print("cuda device count:", torch.cuda.device_count())
+          assert torch.version.cuda is not None, "PyTorch is not a CUDA/GPU build"
+          PY
+
+          echo "Check torchvision:"
+          conda run -n tdmpc2 python - <<'PY'
+          import torchvision
+          print("torchvision:", torchvision.__version__)
+          PY
+
+          echo "Check important packages:"
+          conda run -n tdmpc2 python - <<'PY'
+          import dm_control
+          import glfw
+          import gymnasium
+          import imageio
+          import h5py
+          import hydra
+          import submitit
+          import omegaconf
+          import moviepy
+          import mujoco
+          import numpy
+          import tensordict
+          import torchrl
+          import kornia
+          import termcolor
+          import tqdm
+          import pandas
+          import wandb
+
+          print("numpy:", numpy.__version__)
+          print("tensordict:", tensordict.__version__)
+          print("torchrl:", torchrl.__version__)
+          print("all important packages imported successfully")
+          PY
 
       - name: Install conda-pack into base with pip
         shell: bash
@@ -252,15 +308,21 @@ jobs:
             ```text
             pytorch=2.6.0.dev20241112
             pytorch-cuda=12.4
-            tensordict-nightly
-            torchrl-nightly
+            torchvision=0.15.2
+            tensordict-nightly==2025.1.1
+            torchrl-nightly==2025.1.1
+            mujoco==3.1.2
             dm-control==1.0.16
             gymnasium==0.29.1
-            mujoco==3.1.2
             hydra-core==1.3.2
-            kornia==0.7.2
             wandb==0.17.4
-            pandas==2.0.3
+            ```
+
+            Note:
+
+            ```text
+            tensordict-nightly and torchrl-nightly are installed from PyPI default index,
+            not from https://download.pytorch.org/whl/nightly/cu124
             ```
 
             Download all parts, then merge:
@@ -286,6 +348,16 @@ jobs:
 
             ```bash
             conda-unpack
+            ```
+
+            Check:
+
+            ```bash
+            python -V
+            python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import torchvision; print(torchvision.__version__)"
+            python -c "import tensordict; print(tensordict.__version__)"
+            python -c "import torchrl; print(torchrl.__version__)"
             ```
           files: |
             release_parts/tdmpc2.tar.gz.part-*
