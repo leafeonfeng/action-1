@@ -20,7 +20,7 @@ jobs:
           cat > environment.yml <<'EOF'
           name: tdmpc2
           channels:
-            - pytorch-nightly
+            - pytorch
             - nvidia
             - conda-forge
             - defaults
