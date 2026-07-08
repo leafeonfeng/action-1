@@ -25,13 +25,13 @@ jobs:
             - conda-forge
             - defaults
           dependencies:
-            - python=3.9
+            - python=3.10
             - pip=24.0
             - glew=2.2.0
             - glib=2.78.4
-            - pytorch=2.6.0.dev20241112
-            - pytorch-cuda=12.4
-            - torchvision=0.15.2
+            - pytorch=2.7.1
+            - pytorch-cuda=12.6
+            - torchvision=0.22.1
           EOF
 
           cat > requirements.txt <<'EOF'
@@ -43,7 +43,7 @@ jobs:
           imageio-ffmpeg==0.4.9
           h5py==3.11.0
           hydra-core==1.3.2
-          hydra-submitit-launcher==1.2.0
+          hydra-submitit-launcher
           submitit==1.5.1
           omegaconf==2.3.0
           moviepy==1.0.3
@@ -54,6 +54,8 @@ jobs:
           tqdm==4.66.4
           pandas==2.0.3
           wandb==0.17.4
+          torchrl==0.8
+          tensordict==0.8
           EOF
 
           echo "Generated environment.yml:"
