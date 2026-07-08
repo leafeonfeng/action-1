@@ -1,0 +1,251 @@
+name: Pack 4D-humans Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml and requirements.txt
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: 4D-humans
+          channels:
+            - pytorch
+            - nvidia
+            - conda-forge
+          dependencies:
+            - python=3.10
+            - numpy
+            - pip=24.0
+            - pytorch
+            - pytorch-cuda=11.8
+            - torchvision
+            - pip
+          EOF
+
+          cat > requirements.txt <<'EOF'
+          pytorch-lightning
+          smplx==0.1.28
+          pyrender
+          opencv-python
+          yacs
+          scikit-image
+          einops
+          timm
+          dill
+          pandas
+          rich
+          hydra-core
+          hydra-submitit-launcher
+          hydra-colorlog
+          pyrootutils
+          webdataset
+          git+https://github.com/facebookresearch/detectron2
+          git+https://github.com/mattloper/chumpy
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
+          echo "Generated requirements.txt:"
+          cat requirements.txt
+
+      - name: Setup Miniconda and create 4D-humans environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: 4D-humans
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Install pip requirements
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+
+          conda run -n 4D-humans python -m pip install --upgrade pip setuptools wheel
+
+          echo "Install requirements.txt:"
+          conda run -n 4D-humans python -m pip install -r requirements.txt
+
+          echo "Disk after pip requirements:"
+          df -h
+
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+          conda info
+          conda env list
+
+          echo "Disk after environment creation:"
+          df -h
+
+          echo "4D-humans env size:"
+          du -sh "$CONDA/envs/4D-humans"
+
+      - name: Install conda-pack into base with pip
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "CONDA=$CONDA"
+
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before clean:"
+          df -h
+
+          conda clean -a -y
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/4D-humans."
+
+          echo "4D-humans env size:"
+          du -sh "$CONDA/envs/4D-humans"
+
+          echo "Disk after clean:"
+          df -h
+
+      - name: Pack and split 4D-humans environment
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "Disk before pack:"
+          df -h
+
+          rm -rf release_parts
+          mkdir -p release_parts
+
+          rm -f 4D-humans.tar.gz
+
+          "$CONDA/bin/conda-pack" \
+            -n 4D-humans \
+            -o 4D-humans.tar.gz \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          ls -lh 4D-humans.tar.gz
+          df -h
+
+          rm -rf "$CONDA/envs/4D-humans" || true
+          rm -rf "$CONDA/pkgs" || true
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "Disk after deleting env and caches:"
+          df -h
+
+          split -b 1000M -d -a 3 4D-humans.tar.gz release_parts/4D-humans.tar.gz.part-
+          rm -f 4D-humans.tar.gz
+
+          cd release_parts
+          ls -lh
+
+          echo "Disk after split:"
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: 4d-humans-conda-${{ github.run_number }}
+          name: 4D-humans Conda Environment ${{ github.run_number }}
+          body: |
+            4D-humans Conda environment package.
+
+            Environment name:
+
+            ```text
+            4D-humans
+            ```
+
+            Python version:
+
+            ```text
+            Python 3.10
+            ```
+
+            Main packages:
+
+            ```text
+            pytorch
+            pytorch-cuda=11.8
+            torchvision
+            pytorch-lightning
+            smplx==0.1.28
+            pyrender
+            opencv-python
+            yacs
+            scikit-image
+            einops
+            timm
+            pandas
+            hydra-core
+            hydra-submitit-launcher
+            hydra-colorlog
+            webdataset
+            detectron2 (git)
+            chumpy (git)
+            ```
+
+            Download all parts, then merge:
+
+            ```bash
+            cat 4D-humans.tar.gz.part-* > 4D-humans.tar.gz
+            ```
+
+            Extract:
+
+            ```bash
+            mkdir -p 4D-humans
+            tar -xzf 4D-humans.tar.gz -C 4D-humans
+            ```
+
+            Activate:
+
+            ```bash
+            source 4D-humans/bin/activate
+            ```
+
+            First use after extracting:
+
+            ```bash
+            conda-unpack
+            ```
+          files: |
+            release_parts/4D-humans.tar.gz.part-*
+          fail_on_unmatched_files: true
