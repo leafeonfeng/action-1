@@ -20,18 +20,13 @@ jobs:
           cat > environment.yml <<'EOF'
           name: tdmpc2
           channels:
-            - pytorch
-            - nvidia
             - conda-forge
             - defaults
           dependencies:
-            - python=3.10
-            - pip=24.0
             - glew=2.2.0
             - glib=2.78.4
-            - pytorch=2.7.1
-            - pytorch-cuda=12.6
-            - torchvision=0.22.1
+            - pip=24.0
+            - python=3.10
           EOF
 
           cat > requirements.txt <<'EOF'
@@ -49,13 +44,13 @@ jobs:
           moviepy==1.0.3
           mujoco==3.1.2
           numpy==1.24.4
+          tensordict==0.8.0
+          torchrl==0.8.0
           kornia==0.7.2
           termcolor==2.4.0
           tqdm==4.66.4
           pandas==2.0.3
           wandb==0.17.4
-          torchrl==0.8
-          tensordict==0.8
           EOF
 
           echo "Generated environment.yml:"
@@ -73,29 +68,23 @@ jobs:
           environment-file: environment.yml
           auto-activate-base: false
 
-      - name: Install pip requirements
+      - name: Install PyTorch and pip requirements
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
           echo "CONDA=$CONDA"
 
-          echo "Check Python and pip before pip install:"
           conda run -n tdmpc2 python -V
           conda run -n tdmpc2 python -m pip --version
 
           echo "Upgrade build tools:"
           conda run -n tdmpc2 python -m pip install --upgrade pip setuptools wheel
 
-          echo "Check PyTorch from conda:"
-          conda run -n tdmpc2 python - <<'PY'
-          import torch
-          import torchvision
-          print("torch:", torch.__version__)
-          print("torch cuda:", torch.version.cuda)
-          print("cuda available:", torch.cuda.is_available())
-          print("torchvision:", torchvision.__version__)
-          PY
+          echo "Install PyTorch 2.7.1 CUDA 12.6:"
+          conda run -n tdmpc2 python -m pip install \
+            torch==2.7.1 \
+            --index-url https://download.pytorch.org/whl/cu126
 
           echo "Install requirements.txt:"
           conda run -n tdmpc2 python -m pip install -r requirements.txt
@@ -118,56 +107,6 @@ jobs:
           echo "tdmpc2 env size:"
           du -sh "$CONDA/envs/tdmpc2"
 
-      - name: Check tdmpc2 environment
-        shell: bash -el {0}
-        run: |
-          set -euxo pipefail
-
-          echo "Check Python version:"
-          conda run -n tdmpc2 python -V
-
-          echo "Check pip:"
-          conda run -n tdmpc2 python -m pip --version
-
-          echo "Check PyTorch GPU build:"
-          conda run -n tdmpc2 python - <<'PY'
-          import torch
-          print("torch:", torch.__version__)
-          print("torch cuda:", torch.version.cuda)
-          print("cuda available:", torch.cuda.is_available())
-          print("cuda device count:", torch.cuda.device_count())
-          assert torch.version.cuda is not None, "PyTorch is not a CUDA/GPU build"
-          PY
-
-          echo "Check torchvision:"
-          conda run -n tdmpc2 python - <<'PY'
-          import torchvision
-          print("torchvision:", torchvision.__version__)
-          PY
-
-          echo "Check important packages:"
-          conda run -n tdmpc2 python - <<'PY'
-          import dm_control
-          import glfw
-          import gymnasium
-          import imageio
-          import h5py
-          import hydra
-          import submitit
-          import omegaconf
-          import moviepy
-          import mujoco
-          import numpy
-          import kornia
-          import termcolor
-          import tqdm
-          import pandas
-          import wandb
-
-          print("numpy:", numpy.__version__)
-          print("all important packages imported successfully")
-          PY
-
       - name: Install conda-pack into base with pip
         shell: bash
         run: |
@@ -175,13 +114,8 @@ jobs:
 
           echo "CONDA=$CONDA"
 
-          echo "Install conda-pack into base by pip:"
           "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
-
-          echo "Check conda-pack module:"
           "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
-
-          echo "Check conda-pack executable:"
           ls -lh "$CONDA/bin/conda-pack"
           "$CONDA/bin/conda-pack" --version
 
@@ -193,10 +127,7 @@ jobs:
           echo "Disk before clean:"
           df -h
 
-          echo "Clean conda caches:"
           conda clean -a -y
-
-          echo "Remove user caches only:"
           rm -rf ~/.cache/pip || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
@@ -225,13 +156,9 @@ jobs:
 
           rm -f tdmpc2.tar.gz
 
-          echo "Confirm tdmpc2 Python:"
           "$CONDA/bin/conda" run -n tdmpc2 python -V
-
-          echo "Using conda-pack:"
           "$CONDA/bin/conda-pack" --version
 
-          echo "Packing tdmpc2 environment to normal tar.gz file:"
           "$CONDA/bin/conda-pack" \
             -n tdmpc2 \
             -o tdmpc2.tar.gz \
@@ -239,19 +166,11 @@ jobs:
             --ignore-missing-files \
             --force
 
-          echo "Packed file:"
           ls -lh tdmpc2.tar.gz
-
-          echo "Disk after pack before deleting env:"
           df -h
 
-          echo "Delete packed conda environment to free disk before split:"
           rm -rf "$CONDA/envs/tdmpc2" || true
-
-          echo "Delete conda package cache after conda-pack:"
           rm -rf "$CONDA/pkgs" || true
-
-          echo "Delete user caches:"
           rm -rf ~/.cache/pip || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
@@ -262,15 +181,10 @@ jobs:
           echo "Disk after deleting env and caches:"
           df -h
 
-          echo "Split package:"
           split -b 1000M -d -a 3 tdmpc2.tar.gz release_parts/tdmpc2.tar.gz.part-
-
-          echo "Remove full tar.gz to free disk:"
           rm -f tdmpc2.tar.gz
 
           cd release_parts
-
-          echo "Generated parts:"
           ls -lh
 
           echo "Disk after split:"
@@ -293,27 +207,23 @@ jobs:
             Python version:
 
             ```text
-            Python 3.9
+            Python 3.10
             ```
 
             Main packages:
 
             ```text
-            pytorch=2.6.0.dev20241112
-            pytorch-cuda=12.4
-            torchvision=0.15.2
-            mujoco==3.1.2
+            torch==2.7.1
+            CUDA wheel: cu126
+            torchrl==0.8.0
+            tensordict==0.8.0
+            hydra-submitit-launcher==1.2.0
             dm-control==1.0.16
             gymnasium==0.29.1
-            hydra-core==1.3.2
+            mujoco==3.1.2
+            kornia==0.7.2
             wandb==0.17.4
-            ```
-
-            Note:
-
-            ```text
-            tensordict-nightly and torchrl-nightly are not included in this package.
-            Install them manually later if needed.
+            pandas==2.0.3
             ```
 
             Download all parts, then merge:
@@ -339,14 +249,6 @@ jobs:
 
             ```bash
             conda-unpack
-            ```
-
-            Check:
-
-            ```bash
-            python -V
-            python -c "import torch; print(torch.__version__, torch.version.cuda)"
-            python -c "import torchvision; print(torchvision.__version__)"
             ```
           files: |
             release_parts/tdmpc2.tar.gz.part-*
