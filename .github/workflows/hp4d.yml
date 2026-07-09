@@ -50,8 +50,6 @@ jobs:
           hydra-colorlog
           pyrootutils
           webdataset
-          git+https://github.com/facebookresearch/detectron2
-          git+https://github.com/mattloper/chumpy
           EOF
 
           echo "Generated environment.yml:"
