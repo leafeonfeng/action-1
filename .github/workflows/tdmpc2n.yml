@@ -1,0 +1,256 @@
+name: Pack tdmpc2 Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml and requirements.txt
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: tdmpc2
+          channels:
+            - conda-forge
+            - defaults
+          dependencies:
+            - glew=2.2.0
+            - glib=2.78.4
+            - pip=24.0
+            - python=3.10
+          EOF
+
+          cat > requirements.txt <<'EOF'
+          lerobot==0.6.0
+          dm-control==1.0.16
+          glfw==2.7.0
+          gymnasium
+          ffmpeg==1.4
+          imageio
+          imageio-ffmpeg
+          h5py
+          hydra-core==1.3.2
+          hydra-submitit-launcher
+          submitit==1.5.1
+          omegaconf==2.3.0
+          moviepy==1.0.3
+          mujoco==3.1.2
+          numpy
+          tensordict==0.8.1
+          torchrl==0.8.0
+          kornia==0.7.2
+          termcolor
+          tqdm
+          pandas
+          wandb
+          EOF
+
+          echo "Generated environment.yml:"
+          cat environment.yml
+
+          echo "Generated requirements.txt:"
+          cat requirements.txt
+
+      - name: Setup Miniconda and create tdmpc2 environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: tdmpc2
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Install PyTorch and pip requirements
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+
+          conda run -n tdmpc2 python -m pip install --upgrade pip setuptools wheel
+
+          echo "Install PyTorch 2.7.1 CUDA 12.6:"
+          conda run -n tdmpc2 python -m pip install \
+            torch==2.7.1 \
+            torchvision==0.22.1 \
+            torchaudio==2.7.1 \
+            --index-url https://download.pytorch.org/whl/cu126
+
+          echo "Install requirements.txt:"
+          conda run -n tdmpc2 python -m pip install -r requirements.txt
+
+          echo "Disk after pip requirements:"
+          df -h
+
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "CONDA=$CONDA"
+          conda info
+          conda env list
+
+          echo "Disk after environment creation:"
+          df -h
+
+          echo "tdmpc2 env size:"
+          du -sh "$CONDA/envs/tdmpc2"
+
+      - name: Install conda-pack into base with pip
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "CONDA=$CONDA"
+
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
+          ls -lh "$CONDA/bin/conda-pack"
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before clean:"
+          df -h
+
+          conda clean -a -y
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+
+          echo "Do NOT remove $CONDA/pkgs before conda-pack."
+          echo "Do NOT delete files inside $CONDA/envs/tdmpc2."
+
+          echo "tdmpc2 env size:"
+          du -sh "$CONDA/envs/tdmpc2"
+
+          echo "Disk after clean:"
+          df -h
+
+      - name: Pack and split tdmpc2 environment
+        shell: bash
+        run: |
+          set -exo pipefail
+
+          echo "Disk before pack:"
+          df -h
+
+          rm -rf release_parts
+          mkdir -p release_parts
+
+          rm -f tdmpc2.tar.gz
+
+          "$CONDA/bin/conda" run -n tdmpc2 python -V
+          "$CONDA/bin/conda-pack" --version
+
+          "$CONDA/bin/conda-pack" \
+            -n tdmpc2 \
+            -o tdmpc2.tar.gz \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          ls -lh tdmpc2.tar.gz
+          df -h
+
+          rm -rf "$CONDA/envs/tdmpc2" || true
+          rm -rf "$CONDA/pkgs" || true
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "Disk after deleting env and caches:"
+          df -h
+
+          split -b 1000M -d -a 3 tdmpc2.tar.gz release_parts/tdmpc2.tar.gz.part-
+          rm -f tdmpc2.tar.gz
+
+          cd release_parts
+          ls -lh
+
+          echo "Disk after split:"
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tdmpc2-conda-${{ github.run_number }}
+          name: tdmpc2 Conda Environment ${{ github.run_number }}
+          body: |
+            tdmpc2 Conda environment package.
+
+            Environment name:
+
+            ```text
+            tdmpc2
+            ```
+
+            Python version:
+
+            ```text
+            Python 3.10
+            ```
+
+            Main packages:
+
+            ```text
+            torch==2.7.1
+            torchvision==0.22.1
+            torchaudio==2.7.1
+            CUDA wheel: cu126
+            lerobot==0.6.0
+            torchrl==0.8.0
+            tensordict==0.8.1
+            hydra-submitit-launcher
+            dm-control==1.0.16
+            mujoco==3.1.2
+            kornia==0.7.2
+            wandb
+            pandas
+            ```
+
+            Download all parts, then merge:
+
+            ```bash
+            cat tdmpc2.tar.gz.part-* > tdmpc2.tar.gz
+            ```
+
+            Extract:
+
+            ```bash
+            mkdir -p tdmpc2
+            tar -xzf tdmpc2.tar.gz -C tdmpc2
+            ```
+
+            Activate:
+
+            ```bash
+            source tdmpc2/bin/activate
+            ```
+
+            First use after extracting:
+
+            ```bash
+            conda-unpack
+            ```
+          files: |
+            release_parts/tdmpc2.tar.gz.part-*
+          fail_on_unmatched_files: true
