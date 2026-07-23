@@ -23,7 +23,7 @@ jobs:
             - conda-forge
             - defaults
           dependencies:
-            - python=3.12
+            - python=3.11
             - pip
             # 安装实际的 ffmpeg 可执行程序；ffmpeg-python 只是 Python 调用封装。
             - ffmpeg
