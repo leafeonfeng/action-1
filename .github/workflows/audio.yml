@@ -23,8 +23,10 @@ jobs:
             - conda-forge
             - defaults
           dependencies:
-            - python=3.11
-            - pip=24.0
+            - python=3.12
+            - pip
+            # 安装实际的 ffmpeg 可执行程序；ffmpeg-python 只是 Python 调用封装。
+            - ffmpeg
           EOF
 
           cat > requirements.txt <<'EOF'
@@ -37,6 +39,7 @@ jobs:
           mido
           tqdm
           ffmpeg-python
+          basic-pitch
           EOF
 
           echo "Generated environment.yml:"
@@ -93,7 +96,6 @@ jobs:
 
           "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
           "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
-          ls -lh "$CONDA/bin/conda-pack"
           "$CONDA/bin/conda-pack" --version
 
       - name: Clean caches before packing
@@ -106,9 +108,9 @@ jobs:
 
           conda clean -a -y
           rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/conda || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
-          rm -rf ~/.cache/conda || true
           rm -rf ~/.nv || true
 
           echo "Do NOT remove $CONDA/pkgs before conda-pack."
@@ -130,7 +132,6 @@ jobs:
 
           rm -rf release_parts
           mkdir -p release_parts
-
           rm -f audio-processing.tar.gz
 
           "$CONDA/bin/conda" run -n audio-processing python -V
@@ -149,9 +150,9 @@ jobs:
           rm -rf "$CONDA/envs/audio-processing" || true
           rm -rf "$CONDA/pkgs" || true
           rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/conda || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
-          rm -rf ~/.cache/conda || true
           rm -rf ~/.nv || true
           rm -rf /tmp/* || true
 
@@ -184,7 +185,7 @@ jobs:
             Python version:
 
             ```text
-            Python 3.11
+            Python 3.12
             ```
 
             Main packages:
@@ -198,7 +199,9 @@ jobs:
             music21
             mido
             tqdm
+            ffmpeg
             ffmpeg-python
+            basic-pitch
             ```
 
             Download all parts, then merge:
