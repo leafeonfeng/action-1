@@ -1,3 +1,4 @@
+```yaml
 name: Pack Audio Processing Windows Conda Environment
 
 on:
@@ -25,12 +26,11 @@ jobs:
           dependencies:
             - python=3.11
             - pip
-            # ffmpeg-python 只是 Python 封装；此处安装实际 ffmpeg.exe。
+            # ffmpeg-python only wraps ffmpeg.exe; install the real executable.
             - ffmpeg
           "@ | Set-Content -Path environment.yml -Encoding utf8
 
           @"
-          # basic-pitch 0.4.0 支持 Python 3.11；固定版本以避免 pip 回溯到旧版。
           numpy==1.26.4
           scipy==1.11.4
           librosa==0.10.2.post1
@@ -43,7 +43,7 @@ jobs:
           basic-pitch==0.4.0
           "@ | Set-Content -Path requirements.txt -Encoding utf8
 
-      - name: Setup Miniconda and create audio-processing environment
+      - name: Setup Miniconda and create environment
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniconda-version: latest
@@ -60,53 +60,212 @@ jobs:
           conda run -n audio-processing python -m pip install --upgrade pip setuptools wheel
           conda run -n audio-processing python -m pip install --prefer-binary -r requirements.txt
 
-      - name: Install conda-pack into base environment
+      - name: Install conda-pack
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           $base = conda info --base
-          & "$base\python.exe" -m pip install "conda-pack==0.9.1"
+          $basePython = Join-Path $base "python.exe"
 
-      - name: Pack Windows environment
+          & $basePython -m pip install --upgrade pip
+          & $basePython -m pip install "conda-pack==0.9.1"
+
+      - name: Pack and split Windows environment
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           $base = conda info --base
-          $condaPack = "$base\Scripts\conda-pack.exe"
+          $condaPack = Join-Path $base "Scripts\conda-pack.exe"
 
-          Remove-Item -Force audio-processing-windows.zip -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force release_parts -ErrorAction SilentlyContinue
+          $archive = Join-Path $PWD "audio-processing-windows.zip"
+          $releaseDir = Join-Path $PWD "release_parts"
 
-          New-Item -ItemType Directory -Path release_parts | Out-Null
+          Remove-Item -Force $archive -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force $releaseDir -ErrorAction SilentlyContinue
+
+          New-Item -ItemType Directory -Path $releaseDir | Out-Null
+
+          Write-Host "Packing Conda environment..."
 
           & $condaPack `
             -n audio-processing `
-            -o audio-processing-windows.zip `
+            -o $archive `
             --format zip `
             --ignore-missing-files `
             --force
 
-          # GitHub Release 单个文件不能超过 2GB。
-          # 此处每个分片为 1000MB。
-          $sourceFile = Join-Path $PWD "audio-processing-windows.zip"
-          $outputDir = Join-Path $PWD "release_parts"
+          if (-not (Test-Path $archive)) {
+            throw "audio-processing-windows.zip was not created."
+          }
+
+          # GitHub Release has a 2 GB maximum size for one uploaded asset.
+          # Split into 1000 MB parts so every part can be uploaded.
           $partSize = 1000MB
           $bufferSize = 4MB
           $buffer = New-Object byte[] $bufferSize
 
-          $inputStream = [System.IO.File]::OpenRead($sourceFile)
-          $partNumber = 0
+          $inputStream = [System.IO.File]::OpenRead($archive)
+          $partIndex = 0
 
           try {
             while ($inputStream.Position -lt $inputStream.Length) {
-              $partName = "audio-processing-windows.zip.part-{0:D3}" -f $partNumber
-              $partPath = Join-Path $outputDir $partName
+              $partName = "audio-processing-windows.zip.part-{0:D3}" -f $partIndex
+              $partPath = Join-Path $releaseDir $partName
 
               $outputStream = [System.IO.File]::Create($partPath)
               $remaining = $partSize
 
               try {
                 while ($remaining -gt 0 -and $inputStream.Position -lt $inputStream.Length) {
-                  $readSize = [Math]::Min
+                  $toRead = [Math]::Min($buffer.Length, $remaining)
+                  $read = $inputStream.Read($buffer, 0, $toRead)
+
+                  if ($read -le 0) {
+                    break
+                  }
+
+                  $outputStream.Write($buffer, 0, $read)
+                  $remaining -= $read
+                }
+              }
+              finally {
+                $outputStream.Dispose()
+              }
+
+              $partIndex++
+            }
+          }
+          finally {
+            $inputStream.Dispose()
+          }
+
+          Remove-Item -Force $archive
+
+          Copy-Item environment.yml (Join-Path $releaseDir "environment.yml")
+          Copy-Item requirements.txt (Join-Path $releaseDir "requirements.txt")
+
+          Write-Host "Files to upload:"
+          Get-ChildItem $releaseDir | Format-Table Name, Length
+
+      - name: Create GitHub Release and upload files
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: audio-processing-windows-conda-${{ github.run_number }}
+          name: Audio Processing Windows Conda Environment ${{ github.run_number }}
+          body: |
+            Prebuilt Windows x64 Conda environment for audio processing.
+
+            Environment name:
+
+            ```text
+            audio-processing
+            ```
+
+            Python version:
+
+            ```text
+            Python 3.11
+            ```
+
+            Main packages:
+
+            ```text
+            numpy==1.26.4
+            scipy==1.11.4
+            librosa==0.10.2.post1
+            soundfile==0.12.1
+            pretty_midi==0.2.11
+            music21==9.3.0
+            mido==1.3.3
+            tqdm==4.67.1
+            ffmpeg
+            ffmpeg-python==0.2.0
+            basic-pitch==0.4.0
+            ```
+
+            ## Restore the prebuilt environment
+
+            Download all files named:
+
+            ```text
+            audio-processing-windows.zip.part-000
+            audio-processing-windows.zip.part-001
+            audio-processing-windows.zip.part-002
+            ...
+            ```
+
+            Put all parts into the same directory.
+
+            Merge them in PowerShell:
+
+            ```powershell
+            Get-Content `
+              .\audio-processing-windows.zip.part-* `
+              -Encoding Byte `
+              -ReadCount 0 |
+              Set-Content `
+                .\audio-processing-windows.zip `
+                -Encoding Byte
+            ```
+
+            Extract the generated zip file directly into your Anaconda or Miniconda `envs` directory.
+
+            Example for Anaconda:
+
+            ```powershell
+            Expand-Archive `
+              -Path .\audio-processing-windows.zip `
+              -DestinationPath "$env:USERPROFILE\anaconda3\envs\audio-processing"
+            ```
+
+            Example for Miniconda:
+
+            ```powershell
+            Expand-Archive `
+              -Path .\audio-processing-windows.zip `
+              -DestinationPath "$env:USERPROFILE\miniconda3\envs\audio-processing"
+            ```
+
+            The final directory must contain files such as:
+
+            ```text
+            C:\Users\YOUR_NAME\anaconda3\envs\audio-processing\python.exe
+            C:\Users\YOUR_NAME\anaconda3\envs\audio-processing\conda-meta
+            ```
+
+            Do not create an extra nested directory such as:
+
+            ```text
+            audio-processing\audio-processing\python.exe
+            ```
+
+            Open a new Anaconda Prompt or PowerShell window, then run:
+
+            ```powershell
+            conda activate audio-processing
+            conda-unpack
+            ```
+
+            Future use:
+
+            ```powershell
+            conda activate audio-processing
+            ```
+
+            ## Rebuild manually
+
+            This release also includes `environment.yml` and `requirements.txt`.
+
+            ```powershell
+            conda env create -f environment.yml
+            conda activate audio-processing
+            python -m pip install -r requirements.txt
+            ```
+          files: |
+            release_parts/audio-processing-windows.zip.part-*
+            release_parts/environment.yml
+            release_parts/requirements.txt
+          fail_on_unmatched_files: true
+```
