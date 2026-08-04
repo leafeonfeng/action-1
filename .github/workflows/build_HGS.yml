@@ -27,17 +27,13 @@ jobs:
           dependencies:
             - python=3.8.19
             - pip=24.2
-            - git
             - ninja
-            # 保留项目指定的 CUDA Toolkit 运行时。
-            # PyTorch / torchvision / torchaudio / torch-scatter
-            # 会在后续步骤中从 cu118 预编译 wheel 安装。
             - cudatoolkit=11.8
           EOF
 
           cat > requirements.txt <<'EOF'
-          # PyTorch-related packages are installed separately from CUDA 11.8 wheels.
-          # Do not add torch / torchvision / torchaudio / torch-scatter here.
+          # Torch-related packages are installed separately from CUDA 11.8 wheels:
+          # torch, torchvision, torchaudio, torch-scatter
 
           plyfile
           tensorboard
@@ -50,7 +46,6 @@ jobs:
           colorama
           opencv-python
           scikit-learn
-          git+https://github.com/tongji-rkr/gsplat-2dgs.git
           EOF
 
           echo "===== environment.yml ====="
@@ -89,7 +84,7 @@ jobs:
 
           PYTORCH_CU118_INDEX="https://download.pytorch.org/whl/cu118"
 
-          echo "===== Install PyTorch 2.1.2 CUDA 11.8 wheels ====="
+          echo "===== Install PyTorch CUDA 11.8 wheels ====="
 
           conda run -n horizon_gs python -m pip install \
             torch==2.1.2 \
@@ -97,7 +92,7 @@ jobs:
             torchaudio==2.1.2 \
             --index-url "$PYTORCH_CU118_INDEX"
 
-          echo "===== Verify PyTorch CUDA wheel ====="
+          echo "===== Verify PyTorch CUDA 11.8 ====="
 
           conda run -n horizon_gs python - <<'PY'
           import torch
@@ -115,7 +110,7 @@ jobs:
           assert torchvision.__version__.startswith("0.16.2"), torchvision.__version__
           assert torchaudio.__version__.startswith("2.1.2"), torchaudio.__version__
           assert torch.version.cuda == "11.8", (
-              f"Expected PyTorch cu118 wheel, got CUDA {torch.version.cuda}"
+              f"Expected CUDA 11.8 PyTorch wheel, got CUDA {torch.version.cuda}"
           )
           PY
 
@@ -124,12 +119,13 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # PyG 为 torch 2.1.x + CUDA 11.8 提供的预编译 wheel 页面。
+          # PyG uses the torch 2.1.0 page for PyTorch 2.1.x compatible wheels.
           PYG_CU118_WHEEL_URL="https://data.pyg.org/whl/torch-2.1.0+cu118.html"
 
-          echo "===== Install torch-scatter from PyG cu118 wheel index ====="
+          echo "===== Install torch-scatter from PyG cu118 wheel page ====="
 
           conda run -n horizon_gs python -m pip install \
+            --no-cache-dir \
             torch-scatter \
             -f "$PYG_CU118_WHEEL_URL"
 
@@ -145,23 +141,20 @@ jobs:
           print("torch-scatter imported successfully")
           PY
 
-      - name: Install other Horizon-GS pip requirements
+      - name: Install remaining Horizon-GS dependencies
         shell: bash -el {0}
         run: |
           set -euxo pipefail
-
-          echo "===== Install normal pip dependencies ====="
 
           conda run -n horizon_gs python -m pip install \
             --prefer-binary \
             -r requirements.txt
 
           echo "===== Installed torch-related packages ====="
-
           conda run -n horizon_gs python -m pip list | grep -Ei \
             'torch|scatter|cuda|nvidia' || true
 
-          echo "===== Disk usage after package installation ====="
+          echo "===== Disk usage after installation ====="
           df -h
 
       - name: Check horizon_gs environment
@@ -169,10 +162,10 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "===== Check Python ====="
+          echo "===== Python ====="
           conda run -n horizon_gs python -V
 
-          echo "===== Check PyTorch CUDA 11.8 ====="
+          echo "===== PyTorch CUDA 11.8 ====="
           conda run -n horizon_gs python - <<'PY'
           import torch
           import torchvision
@@ -189,7 +182,7 @@ jobs:
           assert torch.version.cuda == "11.8"
           PY
 
-          echo "===== Check normal Python dependencies ====="
+          echo "===== Normal Python packages ====="
           conda run -n horizon_gs python - <<'PY'
           import colorama
           import einops
@@ -207,15 +200,7 @@ jobs:
           print("laspy:", laspy.__version__)
           print("scikit-learn:", sklearn.__version__)
           print("wandb:", wandb.__version__)
-          print("Normal Python packages imported successfully.")
-          PY
-
-          echo "===== Check gsplat-2dgs package ====="
-          conda run -n horizon_gs python - <<'PY'
-          import gsplat
-
-          print("gsplat imported successfully")
-          print("gsplat location:", gsplat.__file__)
+          print("All normal packages imported successfully.")
           PY
 
       - name: Show Conda information
@@ -241,7 +226,6 @@ jobs:
           "$CONDA/bin/python" -m pip install --upgrade pip
           "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
 
-          echo "===== conda-pack version ====="
           "$CONDA/bin/conda-pack" --version
 
       - name: Clean caches before packing
@@ -284,7 +268,7 @@ jobs:
           "$CONDA/bin/conda" run -n "$ENV_NAME" python -c \
             "import torch; print('torch:', torch.__version__, 'CUDA:', torch.version.cuda)"
 
-          echo "===== Pack environment ====="
+          echo "===== Pack Conda environment ====="
           "$CONDA/bin/conda-pack" \
             -n "$ENV_NAME" \
             -o "$ARCHIVE_NAME" \
@@ -295,7 +279,7 @@ jobs:
           echo "===== Packed archive ====="
           ls -lh "$ARCHIVE_NAME"
 
-          echo "===== Delete environment and caches before splitting ====="
+          echo "===== Delete environment and cache before splitting ====="
           rm -rf "$CONDA/envs/$ENV_NAME" || true
           rm -rf "$CONDA/pkgs" || true
           rm -rf ~/.cache/pip || true
@@ -308,7 +292,7 @@ jobs:
           echo "===== Disk before splitting ====="
           df -h
 
-          # 每个 GitHub Release 附件分片为 1000MB。
+          # Each GitHub Release asset is 1000MB.
           split \
             -b 1000M \
             -d \
@@ -349,16 +333,16 @@ jobs:
             torch==2.1.2+cu118
             torchvision==0.16.2+cu118
             torchaudio==2.1.2+cu118
-            torch-scatter (PyG cu118 prebuilt wheel)
+            torch-scatter (PyG cu118 wheel)
             ```
 
-            PyTorch wheel source:
+            PyTorch CUDA wheel source:
 
             ```text
             https://download.pytorch.org/whl/cu118
             ```
 
-            torch-scatter wheel source:
+            torch-scatter CUDA wheel source:
 
             ```text
             https://data.pyg.org/whl/torch-2.1.0+cu118.html
@@ -378,12 +362,11 @@ jobs:
             colorama
             opencv-python
             scikit-learn
-            gsplat-2dgs
             ```
 
             ## Restore
 
-            Download all archive parts into one directory:
+            Download every file named like this into the same directory:
 
             ```text
             horizon_gs.tar.gz.part-000
@@ -392,7 +375,7 @@ jobs:
             ...
             ```
 
-            Merge them:
+            Merge all archive parts:
 
             ```bash
             cat horizon_gs.tar.gz.part-* > horizon_gs.tar.gz
@@ -411,7 +394,7 @@ jobs:
             source horizon_gs/bin/activate
             ```
 
-            Run once after extraction to relocate Conda paths:
+            Run once after extraction:
 
             ```bash
             conda-unpack
@@ -425,7 +408,6 @@ jobs:
             python -c "import torchvision; print(torchvision.__version__)"
             python -c "import torchaudio; print(torchaudio.__version__)"
             python -c "import torch_scatter; print(torch_scatter.__version__)"
-            python -c "import gsplat; print(gsplat.__file__)"
             ```
 
             `environment.yml` and `requirements.txt` are included for manual rebuilding.
