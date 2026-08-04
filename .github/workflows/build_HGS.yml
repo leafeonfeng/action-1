@@ -1,4 +1,4 @@
-name: Pack horizon_gs Conda Environment
+name: Pack Horizon-GS Conda Environment
 
 on:
   workflow_dispatch:
@@ -8,13 +8,13 @@ permissions:
 
 jobs:
   pack:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create environment.yml
+      - name: Create environment.yml and requirements.txt
         shell: bash
         run: |
           cat > environment.yml <<'EOF'
@@ -25,29 +25,39 @@ jobs:
             - conda-forge
             - defaults
           dependencies:
-            - cudatoolkit=11.8
             - python=3.8.19
             - pip=24.2
-            - pytorch=2.1.2
-            - torchaudio=2.1.2
-            - torchvision=0.16.2
-            - pytorch-scatter
-            - pip:
-              - plyfile
-              - tensorboard
-              - tqdm
-              - einops
-              - wandb
-              - lpips
-              - laspy
-              - jaxtyping
-              - colorama
-              - opencv-python
-              - scikit-learn
+            - git
+            - ninja
+            # 保留项目指定的 CUDA Toolkit 运行时。
+            # PyTorch / torchvision / torchaudio / torch-scatter
+            # 会在后续步骤中从 cu118 预编译 wheel 安装。
+            - cudatoolkit=11.8
           EOF
 
-          echo "Generated environment.yml:"
+          cat > requirements.txt <<'EOF'
+          # PyTorch-related packages are installed separately from CUDA 11.8 wheels.
+          # Do not add torch / torchvision / torchaudio / torch-scatter here.
+
+          plyfile
+          tensorboard
+          tqdm
+          einops
+          wandb
+          lpips
+          laspy
+          jaxtyping
+          colorama
+          opencv-python
+          scikit-learn
+          git+https://github.com/tongji-rkr/gsplat-2dgs.git
+          EOF
+
+          echo "===== environment.yml ====="
           cat environment.yml
+
+          echo "===== requirements.txt ====="
+          cat requirements.txt
 
       - name: Setup Miniconda and create horizon_gs environment
         uses: conda-incubator/setup-miniconda@v3
@@ -58,81 +68,180 @@ jobs:
           environment-file: environment.yml
           auto-activate-base: false
 
-      - name: Show conda information
+      - name: Upgrade pip build tools
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
-          echo "CONDA=$CONDA"
-          conda info
-          conda env list
+          conda run -n horizon_gs python -V
+          conda run -n horizon_gs python -m pip --version
 
-          echo "Disk after environment creation:"
+          conda run -n horizon_gs python -m pip install \
+            --upgrade \
+            pip==24.2 \
+            setuptools \
+            wheel
+
+      - name: Install PyTorch CUDA 11.8 packages
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          PYTORCH_CU118_INDEX="https://download.pytorch.org/whl/cu118"
+
+          echo "===== Install PyTorch 2.1.2 CUDA 11.8 wheels ====="
+
+          conda run -n horizon_gs python -m pip install \
+            torch==2.1.2 \
+            torchvision==0.16.2 \
+            torchaudio==2.1.2 \
+            --index-url "$PYTORCH_CU118_INDEX"
+
+          echo "===== Verify PyTorch CUDA wheel ====="
+
+          conda run -n horizon_gs python - <<'PY'
+          import torch
+          import torchvision
+          import torchaudio
+
+          print("torch:", torch.__version__)
+          print("torch CUDA:", torch.version.cuda)
+          print("torchvision:", torchvision.__version__)
+          print("torchaudio:", torchaudio.__version__)
+          print("CUDA available on GitHub Actions runner:", torch.cuda.is_available())
+          print("CUDA device count:", torch.cuda.device_count())
+
+          assert torch.__version__.startswith("2.1.2"), torch.__version__
+          assert torchvision.__version__.startswith("0.16.2"), torchvision.__version__
+          assert torchaudio.__version__.startswith("2.1.2"), torchaudio.__version__
+          assert torch.version.cuda == "11.8", (
+              f"Expected PyTorch cu118 wheel, got CUDA {torch.version.cuda}"
+          )
+          PY
+
+      - name: Install torch-scatter from PyG CUDA 11.8 wheels
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          # PyG 为 torch 2.1.x + CUDA 11.8 提供的预编译 wheel 页面。
+          PYG_CU118_WHEEL_URL="https://data.pyg.org/whl/torch-2.1.0+cu118.html"
+
+          echo "===== Install torch-scatter from PyG cu118 wheel index ====="
+
+          conda run -n horizon_gs python -m pip install \
+            torch-scatter \
+            -f "$PYG_CU118_WHEEL_URL"
+
+          echo "===== Verify torch-scatter ====="
+
+          conda run -n horizon_gs python - <<'PY'
+          import torch
+          import torch_scatter
+
+          print("torch:", torch.__version__)
+          print("torch CUDA:", torch.version.cuda)
+          print("torch_scatter:", torch_scatter.__version__)
+          print("torch-scatter imported successfully")
+          PY
+
+      - name: Install other Horizon-GS pip requirements
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "===== Install normal pip dependencies ====="
+
+          conda run -n horizon_gs python -m pip install \
+            --prefer-binary \
+            -r requirements.txt
+
+          echo "===== Installed torch-related packages ====="
+
+          conda run -n horizon_gs python -m pip list | grep -Ei \
+            'torch|scatter|cuda|nvidia' || true
+
+          echo "===== Disk usage after package installation ====="
           df -h
-
-          echo "horizon_gs env size:"
-          du -sh "$CONDA/envs/horizon_gs"
 
       - name: Check horizon_gs environment
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
-          echo "Check Python version:"
+          echo "===== Check Python ====="
           conda run -n horizon_gs python -V
 
-          echo "Check pip:"
-          conda run -n horizon_gs python -m pip --version
-
-          echo "Check PyTorch:"
+          echo "===== Check PyTorch CUDA 11.8 ====="
           conda run -n horizon_gs python - <<'PY'
           import torch
-          print("torch:", torch.__version__)
-          print("torch cuda:", torch.version.cuda)
-          print("cuda available:", torch.cuda.is_available())
-          print("cuda device count:", torch.cuda.device_count())
-          PY
-
-          echo "Check pytorch_scatter:"
-          conda run -n horizon_gs python - <<'PY'
+          import torchvision
+          import torchaudio
           import torch_scatter
+
+          print("torch:", torch.__version__)
+          print("torch CUDA:", torch.version.cuda)
+          print("torchvision:", torchvision.__version__)
+          print("torchaudio:", torchaudio.__version__)
           print("torch_scatter:", torch_scatter.__version__)
+          print("CUDA available:", torch.cuda.is_available())
+
+          assert torch.version.cuda == "11.8"
           PY
 
-          echo "Check important packages:"
+          echo "===== Check normal Python dependencies ====="
           conda run -n horizon_gs python - <<'PY'
+          import colorama
+          import einops
+          import jaxtyping
+          import laspy
+          import lpips
+          import cv2
           import plyfile
+          import sklearn
           import tensorboard
           import tqdm
-          import einops
           import wandb
-          import lpips
-          import laspy
-          import jaxtyping
-          import colorama
-          import cv2
-          import sklearn
 
-          print("all important packages imported successfully")
-          print("cv2:", cv2.__version__)
-          print("sklearn:", sklearn.__version__)
+          print("opencv:", cv2.__version__)
+          print("laspy:", laspy.__version__)
+          print("scikit-learn:", sklearn.__version__)
+          print("wandb:", wandb.__version__)
+          print("Normal Python packages imported successfully.")
           PY
 
-      - name: Install conda-pack into base with pip
+          echo "===== Check gsplat-2dgs package ====="
+          conda run -n horizon_gs python - <<'PY'
+          import gsplat
+
+          print("gsplat imported successfully")
+          print("gsplat location:", gsplat.__file__)
+          PY
+
+      - name: Show Conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          conda info
+          conda env list
+          conda list -n horizon_gs
+
+          echo "===== horizon_gs environment size ====="
+          du -sh "$CONDA/envs/horizon_gs"
+
+          echo "===== Disk usage ====="
+          df -h
+
+      - name: Install conda-pack into base environment
         shell: bash
         run: |
-          set -exo pipefail
+          set -euxo pipefail
 
-          echo "CONDA=$CONDA"
-
-          echo "Install conda-pack into base by pip:"
+          "$CONDA/bin/python" -m pip install --upgrade pip
           "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
 
-          echo "Check conda-pack module:"
-          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
-
-          echo "Check conda-pack executable:"
-          ls -lh "$CONDA/bin/conda-pack"
+          echo "===== conda-pack version ====="
           "$CONDA/bin/conda-pack" --version
 
       - name: Clean caches before packing
@@ -140,116 +249,150 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "Disk before clean:"
+          echo "===== Disk before cleanup ====="
           df -h
 
-          echo "Clean conda caches:"
           conda clean -a -y
 
-          echo "Remove user caches only:"
           rm -rf ~/.cache/pip || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
           rm -rf ~/.cache/conda || true
           rm -rf ~/.nv || true
-          
-          echo "Do NOT remove $CONDA/pkgs before conda-pack."
-          echo "Do NOT delete files inside $CONDA/envs/horizon_gs."
 
-          echo "horizon_gs env size:"
+          echo "===== horizon_gs environment size ====="
           du -sh "$CONDA/envs/horizon_gs"
 
-          echo "Disk after clean:"
+          echo "===== Disk after cleanup ====="
           df -h
 
       - name: Pack and split horizon_gs environment
         shell: bash
         run: |
-          set -exo pipefail
+          set -euxo pipefail
 
-          echo "Disk before pack:"
-          df -h
+          ENV_NAME="horizon_gs"
+          ARCHIVE_NAME="horizon_gs.tar.gz"
+          RELEASE_DIR="release_parts"
 
-          rm -rf release_parts
-          mkdir -p release_parts
+          rm -rf "$RELEASE_DIR"
+          mkdir -p "$RELEASE_DIR"
+          rm -f "$ARCHIVE_NAME"
 
-          rm -f horizon_gs.tar.gz
+          echo "===== Confirm environment ====="
+          "$CONDA/bin/conda" run -n "$ENV_NAME" python -V
+          "$CONDA/bin/conda" run -n "$ENV_NAME" python -c \
+            "import torch; print('torch:', torch.__version__, 'CUDA:', torch.version.cuda)"
 
-          echo "Confirm horizon_gs Python:"
-          "$CONDA/bin/conda" run -n horizon_gs python -V
-
-          echo "Using conda-pack:"
-          "$CONDA/bin/conda-pack" --version
-
-          echo "Packing horizon_gs environment to normal tar.gz file:"
+          echo "===== Pack environment ====="
           "$CONDA/bin/conda-pack" \
-            -n horizon_gs \
-            -o horizon_gs.tar.gz \
+            -n "$ENV_NAME" \
+            -o "$ARCHIVE_NAME" \
             --format tar.gz \
             --ignore-missing-files \
             --force
 
-          echo "Packed file:"
-          ls -lh horizon_gs.tar.gz
+          echo "===== Packed archive ====="
+          ls -lh "$ARCHIVE_NAME"
 
-          echo "Disk after pack:"
+          echo "===== Delete environment and caches before splitting ====="
+          rm -rf "$CONDA/envs/$ENV_NAME" || true
+          rm -rf "$CONDA/pkgs" || true
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "===== Disk before splitting ====="
           df -h
 
-          echo "Split package:"
-          split -b 1900M -d -a 3 horizon_gs.tar.gz release_parts/horizon_gs.tar.gz.part-
+          # 每个 GitHub Release 附件分片为 1000MB。
+          split \
+            -b 1000M \
+            -d \
+            -a 3 \
+            "$ARCHIVE_NAME" \
+            "$RELEASE_DIR/horizon_gs.tar.gz.part-"
 
-          echo "Generate checksum for full tar.gz:"
-          sha256sum horizon_gs.tar.gz > release_parts/horizon_gs.tar.gz.sha256
+          rm -f "$ARCHIVE_NAME"
 
-          echo "Remove full tar.gz to free disk:"
-          rm -f horizon_gs.tar.gz
+          cp environment.yml "$RELEASE_DIR/environment.yml"
+          cp requirements.txt "$RELEASE_DIR/requirements.txt"
 
-          cd release_parts
+          echo "===== Generated release files ====="
+          ls -lh "$RELEASE_DIR"
 
-          echo "Generated parts:"
-          ls -lh
-
-          echo "Generate SHA256SUMS for parts:"
-          sha256sum horizon_gs.tar.gz.part-* > SHA256SUMS.txt
-
-          echo "Checksums:"
-          cat SHA256SUMS.txt
-          cat horizon_gs.tar.gz.sha256
-
-          echo "Disk after split:"
+          echo "===== Disk after splitting ====="
           df -h
-          
+
       - name: Create GitHub Release and upload parts
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: horizon-gs-conda-${{ github.run_number }}
-          name: horizon_gs Conda Environment ${{ github.run_number }}
+          tag_name: horizon-gs-cu118-conda-${{ github.run_number }}
+          name: Horizon-GS CUDA 11.8 Conda Environment ${{ github.run_number }}
           body: |
-            horizon_gs Conda environment package.
+            Prebuilt Linux x64 Conda environment for Horizon-GS.
 
-            Environment name:
-
-            ```text
-            horizon_gs
-            ```
-
-            Python version:
+            ## Environment
 
             ```text
-            Python 3.8.19
+            Name: horizon_gs
+            Python: 3.8.19
+            CUDA: 11.8 (cu118)
             ```
 
-            Main packages:
+            ## PyTorch CUDA packages
 
             ```text
-            cudatoolkit=11.8
-            pytorch=2.1.2
-            torchvision=0.16.2
-            torchaudio=2.1.2
-            pytorch-scatter
+            torch==2.1.2+cu118
+            torchvision==0.16.2+cu118
+            torchaudio==2.1.2+cu118
+            torch-scatter (PyG cu118 prebuilt wheel)
             ```
 
-            Download all parts, then merge:
+            PyTorch wheel source:
+
+            ```text
+            https://download.pytorch.org/whl/cu118
+            ```
+
+            torch-scatter wheel source:
+
+            ```text
+            https://data.pyg.org/whl/torch-2.1.0+cu118.html
+            ```
+
+            ## Other packages
+
+            ```text
+            plyfile
+            tensorboard
+            tqdm
+            einops
+            wandb
+            lpips
+            laspy
+            jaxtyping
+            colorama
+            opencv-python
+            scikit-learn
+            gsplat-2dgs
+            ```
+
+            ## Restore
+
+            Download all archive parts into one directory:
+
+            ```text
+            horizon_gs.tar.gz.part-000
+            horizon_gs.tar.gz.part-001
+            horizon_gs.tar.gz.part-002
+            ...
+            ```
+
+            Merge them:
 
             ```bash
             cat horizon_gs.tar.gz.part-* > horizon_gs.tar.gz
@@ -268,23 +411,26 @@ jobs:
             source horizon_gs/bin/activate
             ```
 
-            First use after extracting:
+            Run once after extraction to relocate Conda paths:
 
             ```bash
             conda-unpack
             ```
 
-            Check:
+            Verify:
 
             ```bash
             python -V
             python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import torchvision; print(torchvision.__version__)"
+            python -c "import torchaudio; print(torchaudio.__version__)"
             python -c "import torch_scatter; print(torch_scatter.__version__)"
+            python -c "import gsplat; print(gsplat.__file__)"
             ```
 
-            SHA256 checksums are included in `SHA256SUMS.txt`.
+            `environment.yml` and `requirements.txt` are included for manual rebuilding.
           files: |
             release_parts/horizon_gs.tar.gz.part-*
-            release_parts/SHA256SUMS.txt
+            release_parts/environment.yml
+            release_parts/requirements.txt
           fail_on_unmatched_files: true
-
