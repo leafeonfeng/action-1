@@ -30,9 +30,8 @@ jobs:
           EOF
 
           cat > requirements.txt <<'EOF'
-          # Core Python dependencies for Proxy-GS.
-          # Install PyTorch, torch-scatter, and the local CUDA extensions separately
-          # following the instructions in README.md.
+          # PyTorch / torchvision / torch-scatter are installed separately.
+          # They must use CUDA 12.6 compatible wheels.
 
           colorama==0.4.6
           einops==0.8.1
@@ -51,10 +50,10 @@ jobs:
           wandb==0.23.0
           EOF
 
-          echo "Generated environment.yml:"
+          echo "===== environment.yml ====="
           cat environment.yml
 
-          echo "Generated requirements.txt:"
+          echo "===== requirements.txt ====="
           cat requirements.txt
 
       - name: Setup Miniconda and create Proxy-GS environment
@@ -66,75 +65,112 @@ jobs:
           environment-file: environment.yml
           auto-activate-base: false
 
-      - name: Install GPU PyTorch and pip requirements
+      - name: Install CUDA 12.6 PyTorch and PyG packages
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
-          echo "CONDA=$CONDA"
+          PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu126"
+          PYG_WHEEL_URL="https://data.pyg.org/whl/torch-2.6.0+cu126.html"
 
-          echo "Check Python and pip before pip install:"
+          echo "===== Python / pip information ====="
           conda run -n Proxy-GS python -V
           conda run -n Proxy-GS python -m pip --version
 
-          echo "Upgrade build tools:"
+          echo "===== Upgrade pip build tools ====="
           conda run -n Proxy-GS python -m pip install --upgrade pip setuptools wheel
 
-          echo "Install PyTorch GPU CUDA 11.8 wheels:"
+          echo "===== Install PyTorch CUDA 12.6 ====="
           conda run -n Proxy-GS python -m pip install \
-            torch==2.2.0 \
-            torchvision==0.17.0 \
-            --index-url https://download.pytorch.org/whl/cu118
+            torch==2.6.0 \
+            torchvision==0.21.0 \
+            --index-url "$PYTORCH_INDEX_URL"
 
-          echo "Install requirements.txt:"
-          conda run -n Proxy-GS python -m pip install -r requirements.txt
+          echo "===== Check PyTorch CUDA version ====="
+          conda run -n Proxy-GS python - <<'PY'
+          import torch
 
-          echo "Disk after pip requirements:"
-          df -h
+          print("torch version:", torch.__version__)
+          print("torch CUDA version:", torch.version.cuda)
+          print("CUDA available:", torch.cuda.is_available())
+          print("CUDA device count:", torch.cuda.device_count())
 
-      - name: Show conda information
+          assert torch.version.cuda == "12.6", (
+              f"Expected CUDA 12.6 PyTorch wheel, got {torch.version.cuda}"
+          )
+          PY
+
+          echo "===== Install PyG CUDA 12.6 binary packages ====="
+          conda run -n Proxy-GS python -m pip install \
+            pyg_lib \
+            torch_sparse \
+            torch_cluster \
+            torch_spline_conv \
+            -f "$PYG_WHEEL_URL"
+
+          echo "===== Install torch-scatter last ====="
+          conda run -n Proxy-GS python -m pip install \
+            torch-scatter \
+            -f "$PYG_WHEEL_URL"
+
+          echo "===== Show installed torch-related packages ====="
+          conda run -n Proxy-GS python -m pip list | grep -E \
+            'torch|pyg|scatter|sparse|cluster|spline' || true
+
+      - name: Install remaining pip requirements
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
-          echo "CONDA=$CONDA"
-          conda info
-          conda env list
+          echo "===== Install requirements.txt ====="
+          conda run -n Proxy-GS python -m pip install \
+            --prefer-binary \
+            -r requirements.txt
 
-          echo "Disk after environment creation:"
+          echo "===== Disk usage after requirements install ====="
           df -h
-
-          echo "Proxy-GS env size:"
-          du -sh "$CONDA/envs/Proxy-GS"
 
       - name: Check Proxy-GS environment
         shell: bash -el {0}
         run: |
           set -euxo pipefail
 
-          echo "Check Python version:"
+          echo "===== Python ====="
           conda run -n Proxy-GS python -V
 
-          echo "Check pip:"
-          conda run -n Proxy-GS python -m pip --version
-
-          echo "Check PyTorch GPU wheel:"
+          echo "===== PyTorch / CUDA ====="
           conda run -n Proxy-GS python - <<'PY'
           import torch
-          print("torch:", torch.__version__)
-          print("torch cuda:", torch.version.cuda)
-          print("cuda available:", torch.cuda.is_available())
-          print("cuda device count:", torch.cuda.device_count())
-          assert torch.version.cuda is not None, "PyTorch is not a CUDA/GPU build"
-          PY
-
-          echo "Check torchvision:"
-          conda run -n Proxy-GS python - <<'PY'
           import torchvision
+
+          print("torch:", torch.__version__)
+          print("torch CUDA:", torch.version.cuda)
           print("torchvision:", torchvision.__version__)
+          print("CUDA available:", torch.cuda.is_available())
+
+          assert torch.version.cuda == "12.6"
           PY
 
-          echo "Check important packages:"
+          echo "===== PyG CUDA extensions ====="
+          conda run -n Proxy-GS python - <<'PY'
+          import torch_scatter
+          import torch_sparse
+          import torch_cluster
+          import torch_spline_conv
+
+          try:
+              import pyg_lib
+              print("pyg_lib: OK")
+          except ImportError:
+              print("pyg_lib: not installed or unavailable")
+
+          print("torch_scatter: OK")
+          print("torch_sparse: OK")
+          print("torch_cluster: OK")
+          print("torch_spline_conv: OK")
+          PY
+
+          echo "===== Other important packages ====="
           conda run -n Proxy-GS python - <<'PY'
           import colorama
           import einops
@@ -158,30 +194,37 @@ jobs:
           print("Pillow:", PIL.__version__)
           print("trimesh:", trimesh.__version__)
           print("wandb:", wandb.__version__)
-          print("all important packages imported successfully")
+          print("All normal packages imported successfully.")
           PY
 
-          echo "Check nvdiffrast:"
+          echo "===== nvdiffrast ====="
           conda run -n Proxy-GS python - <<'PY'
           import nvdiffrast
           print("nvdiffrast imported successfully")
           PY
 
-      - name: Install conda-pack into base with pip
+      - name: Show conda information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          conda info
+          conda env list
+
+          echo "===== Environment size ====="
+          du -sh "$CONDA/envs/Proxy-GS"
+
+          echo "===== Disk usage ====="
+          df -h
+
+      - name: Install conda-pack into base environment
         shell: bash
         run: |
-          set -exo pipefail
+          set -euxo pipefail
 
-          echo "CONDA=$CONDA"
-
-          echo "Install conda-pack into base by pip:"
+          "$CONDA/bin/python" -m pip install --upgrade pip
           "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
 
-          echo "Check conda-pack module:"
-          "$CONDA/bin/python" -c "import conda_pack; print('conda_pack version:', conda_pack.__version__)"
-
-          echo "Check conda-pack executable:"
-          ls -lh "$CONDA/bin/conda-pack"
           "$CONDA/bin/conda-pack" --version
 
       - name: Clean caches before packing
@@ -189,68 +232,54 @@ jobs:
         run: |
           set -euxo pipefail
 
-          echo "Disk before clean:"
+          echo "===== Disk before cleanup ====="
           df -h
 
-          echo "Clean conda caches:"
           conda clean -a -y
 
-          echo "Remove user caches only:"
           rm -rf ~/.cache/pip || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
           rm -rf ~/.cache/conda || true
           rm -rf ~/.nv || true
 
-          echo "Do NOT remove $CONDA/pkgs before conda-pack."
-          echo "Do NOT delete files inside $CONDA/envs/Proxy-GS."
-
-          echo "Proxy-GS env size:"
+          echo "===== Environment size after cleanup ====="
           du -sh "$CONDA/envs/Proxy-GS"
 
-          echo "Disk after clean:"
+          echo "===== Disk after cleanup ====="
           df -h
 
       - name: Pack and split Proxy-GS environment
         shell: bash
         run: |
-          set -exo pipefail
+          set -euxo pipefail
 
-          echo "Disk before pack:"
-          df -h
+          ARCHIVE_NAME="Proxy-GS.tar.gz"
+          RELEASE_DIR="release_parts"
 
-          rm -rf release_parts
-          mkdir -p release_parts
+          rm -rf "$RELEASE_DIR"
+          mkdir -p "$RELEASE_DIR"
 
-          rm -f Proxy-GS.tar.gz
+          rm -f "$ARCHIVE_NAME"
 
-          echo "Confirm Proxy-GS Python:"
+          echo "===== Confirm environment Python version ====="
           "$CONDA/bin/conda" run -n Proxy-GS python -V
 
-          echo "Using conda-pack:"
-          "$CONDA/bin/conda-pack" --version
-
-          echo "Packing Proxy-GS environment to normal tar.gz file:"
+          echo "===== Pack Conda environment ====="
           "$CONDA/bin/conda-pack" \
             -n Proxy-GS \
-            -o Proxy-GS.tar.gz \
+            -o "$ARCHIVE_NAME" \
             --format tar.gz \
             --ignore-missing-files \
             --force
 
-          echo "Packed file:"
-          ls -lh Proxy-GS.tar.gz
+          echo "===== Archive size ====="
+          ls -lh "$ARCHIVE_NAME"
 
-          echo "Disk after pack before deleting env:"
-          df -h
-
-          echo "Delete packed conda environment to free disk before split:"
+          echo "===== Delete original Conda environment to free disk ====="
           rm -rf "$CONDA/envs/Proxy-GS" || true
-
-          echo "Delete conda package cache after conda-pack:"
           rm -rf "$CONDA/pkgs" || true
 
-          echo "Delete user caches:"
           rm -rf ~/.cache/pip || true
           rm -rf ~/.cache/torch || true
           rm -rf ~/.cache/huggingface || true
@@ -258,21 +287,27 @@ jobs:
           rm -rf ~/.nv || true
           rm -rf /tmp/* || true
 
-          echo "Disk after deleting env and caches:"
+          echo "===== Disk before splitting ====="
           df -h
 
-          echo "Split package:"
-          split -b 1000M -d -a 3 Proxy-GS.tar.gz release_parts/Proxy-GS.tar.gz.part-
+          # GitHub Release 的单个附件上限小于 2GB。
+          # 每个分片固定为 1000MB。
+          split \
+            -b 1000M \
+            -d \
+            -a 3 \
+            "$ARCHIVE_NAME" \
+            "$RELEASE_DIR/Proxy-GS.tar.gz.part-"
 
-          echo "Remove full tar.gz to free disk:"
-          rm -f Proxy-GS.tar.gz
+          rm -f "$ARCHIVE_NAME"
 
-          cd release_parts
+          cp environment.yml "$RELEASE_DIR/environment.yml"
+          cp requirements.txt "$RELEASE_DIR/requirements.txt"
 
-          echo "Generated parts:"
-          ls -lh
+          echo "===== Release files ====="
+          ls -lh "$RELEASE_DIR"
 
-          echo "Disk after split:"
+          echo "===== Disk after splitting ====="
           df -h
 
       - name: Create GitHub Release and upload parts
@@ -281,88 +316,89 @@ jobs:
           tag_name: proxy-gs-conda-${{ github.run_number }}
           name: Proxy-GS Conda Environment ${{ github.run_number }}
           body: |
-            Proxy-GS Conda environment package.
+            Prebuilt Proxy-GS Linux x64 Conda environment.
 
-            Environment name:
-
-            ```text
-            Proxy-GS
-            ```
-
-            Python version:
+            ## Environment
 
             ```text
-            Python 3.10
+            Name: Proxy-GS
+            Python: 3.11
             ```
 
-            Main packages:
+            ## CUDA / PyTorch
 
             ```text
-            torch==2.2.0
-            torchvision==0.17.0
-            CUDA wheel: cu118
-
-            colorama==0.4.6
-            einops==0.8.1
-            jaxtyping==0.3.3
-            lpips==0.1.4
-            numpy==2.3.3
-            nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git@abb07ca0358f3a21c3942b50c54aa1eacd329af9
-            open3d==0.19.0
-            opencv-python-headless==4.10.0.84
-            OpenEXR==3.4.4
-            Pillow==11.3.0
-            plyfile==1.1.3
-            scipy==1.16.3
-            tqdm==4.67.1
-            trimesh==4.9.0
-            wandb==0.23.0
+            torch==2.6.0
+            torchvision==0.21.0
+            CUDA wheel: cu126
             ```
 
-            Notes:
+            PyG CUDA extension wheels were installed from:
 
             ```text
-            PyTorch is installed separately before requirements.txt.
-            torch-scatter and local CUDA extensions are not included unless added manually.
+            https://data.pyg.org/whl/torch-2.6.0+cu126.html
             ```
 
-            Download all parts, then merge:
+            Installed PyG packages:
+
+            ```text
+            pyg_lib
+            torch_sparse
+            torch_cluster
+            torch_spline_conv
+            torch-scatter
+            ```
+
+            ## Restore environment
+
+            Download every file below into the same directory:
+
+            ```text
+            Proxy-GS.tar.gz.part-000
+            Proxy-GS.tar.gz.part-001
+            Proxy-GS.tar.gz.part-002
+            ...
+            ```
+
+            Merge the parts:
 
             ```bash
             cat Proxy-GS.tar.gz.part-* > Proxy-GS.tar.gz
             ```
 
-            Extract:
+            Extract the environment:
 
             ```bash
             mkdir -p Proxy-GS
             tar -xzf Proxy-GS.tar.gz -C Proxy-GS
             ```
 
-            Activate:
+            Activate it:
 
             ```bash
             source Proxy-GS/bin/activate
             ```
 
-            First use after extracting:
+            Run this once after extraction:
 
             ```bash
             conda-unpack
             ```
 
-            Check:
+            Verify CUDA package versions:
 
             ```bash
-            python -V
             python -c "import torch; print(torch.__version__, torch.version.cuda)"
             python -c "import torchvision; print(torchvision.__version__)"
-            python -c "import numpy; print(numpy.__version__)"
-            python -c "import scipy; print(scipy.__version__)"
-            python -c "import open3d as o3d; print(o3d.__version__)"
-            python -c "import cv2; print(cv2.__version__)"
-            python -c "import nvdiffrast; print('nvdiffrast ok')"
+            python -c "import torch_scatter; print('torch-scatter OK')"
+            python -c "import torch_sparse; print('torch_sparse OK')"
+            python -c "import torch_cluster; print('torch_cluster OK')"
+            python -c "import torch_spline_conv; print('torch_spline_conv OK')"
             ```
+
+            `environment.yml` and `requirements.txt` are included for reference.
           files: |
             release_parts/Proxy-GS.tar.gz.part-*
+            release_parts/environment.yml
+            release_parts/requirements.txt
           fail_on_unmatched_files: true
