@@ -1,0 +1,342 @@
+name: Pack DriveStudio Conda Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create environment.yml and requirements.txt
+        shell: bash
+        run: |
+          cat > environment.yml <<'EOF'
+          name: drivestudio
+          channels:
+            - conda-forge
+            - defaults
+          dependencies:
+            - python=3.9
+            - pip=24.2
+            - git
+            - ninja
+          EOF
+
+          cat > requirements.txt <<'EOF'
+          --extra-index-url https://download.pytorch.org/whl/cu117
+
+          # PyTorch CUDA 11.7
+          torch==2.0.0+cu117
+          torchvision==0.15.0+cu117
+          xformers==0.0.18
+          timm==0.9.5
+          pytorch_msssim==1.0.0
+          torchmetrics==0.10.3
+
+          # Configuration and logging
+          omegaconf==2.3.0
+          tensorboard==2.11.0
+          wandb==0.15.8
+
+          # Visualization
+          matplotlib==3.5.3
+          plotly==5.13.1
+          viser==0.2.1
+
+          # Images and geometry
+          imageio
+          imageio-ffmpeg
+          scikit-image==0.20.0
+          opencv-python
+          open3d==0.16.0
+          pyquaternion==0.9.9
+          chumpy
+          numpy==1.23.1
+          kornia==0.7.2
+
+          # Utilities
+          tqdm
+          gdown
+          nerfview==0.0.3
+          lpips==0.1.4
+          EOF
+
+          echo "===== environment.yml ====="
+          cat environment.yml
+
+          echo "===== requirements.txt ====="
+          cat requirements.txt
+
+      - name: Setup Miniconda and create drivestudio environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: latest
+          auto-update-conda: false
+          activate-environment: drivestudio
+          environment-file: environment.yml
+          auto-activate-base: false
+
+      - name: Upgrade pip build tools
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          conda run -n drivestudio python -V
+          conda run -n drivestudio python -m pip --version
+
+          conda run -n drivestudio python -m pip install \
+            --upgrade \
+            pip==24.2 \
+            setuptools \
+            wheel
+
+      - name: Install DriveStudio Python dependencies
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          conda run -n drivestudio python -m pip install \
+            --prefer-binary \
+            --no-cache-dir \
+            -r requirements.txt
+
+          echo "===== Installed PyTorch-related packages ====="
+          conda run -n drivestudio python -m pip list | grep -Ei \
+            'torch|xformers|cuda|nvidia|triton' || true
+
+          echo "===== Disk usage after installation ====="
+          df -h
+
+      - name: Verify DriveStudio environment
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "===== Python and PyTorch CUDA 11.7 ====="
+          conda run -n drivestudio python - <<'PY'
+          import torch
+          import torchvision
+          import xformers
+
+          print("Python check completed")
+          print("torch:", torch.__version__)
+          print("torch CUDA:", torch.version.cuda)
+          print("torchvision:", torchvision.__version__)
+          print("xformers:", xformers.__version__)
+          print("CUDA available on GitHub Actions runner:", torch.cuda.is_available())
+          print("CUDA device count:", torch.cuda.device_count())
+
+          assert torch.__version__.startswith("2.0.0+cu117"), torch.__version__
+          assert torchvision.__version__.startswith("0.15.0+cu117"), torchvision.__version__
+          assert torch.version.cuda == "11.7", (
+              f"Expected CUDA 11.7 PyTorch wheel, got CUDA {torch.version.cuda}"
+          )
+          PY
+
+          echo "===== Verify remaining dependencies ====="
+          conda run -n drivestudio python - <<'PY'
+          import chumpy
+          import cv2
+          import gdown
+          import imageio
+          import imageio_ffmpeg
+          import kornia
+          import lpips
+          import matplotlib
+          import nerfview
+          import numpy
+          import omegaconf
+          import open3d
+          import plotly
+          import pyquaternion
+          import skimage
+          import tensorboard
+          import timm
+          import torchmetrics
+          import tqdm
+          import viser
+          import wandb
+          from pytorch_msssim import ssim
+
+          print("numpy:", numpy.__version__)
+          print("opencv:", cv2.__version__)
+          print("open3d:", open3d.__version__)
+          print("matplotlib:", matplotlib.__version__)
+          print("wandb:", wandb.__version__)
+          print("All DriveStudio dependencies imported successfully.")
+          PY
+
+      - name: Show Conda environment information
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          conda info
+          conda env list
+          conda list -n drivestudio
+
+          echo "===== drivestudio environment size ====="
+          du -sh "$CONDA/envs/drivestudio"
+
+          echo "===== Disk usage ====="
+          df -h
+
+      - name: Install conda-pack into base environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          "$CONDA/bin/python" -m pip install --upgrade pip
+          "$CONDA/bin/python" -m pip install "conda-pack==0.9.1"
+
+          echo "===== conda-pack version ====="
+          "$CONDA/bin/conda-pack" --version
+
+      - name: Clean caches before packing
+        shell: bash -el {0}
+        run: |
+          set -euxo pipefail
+
+          echo "===== Disk before cleanup ====="
+          df -h
+
+          conda clean -a -y
+
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+
+          echo "===== Environment size after cleanup ====="
+          du -sh "$CONDA/envs/drivestudio"
+
+          echo "===== Disk after cleanup ====="
+          df -h
+
+      - name: Pack and split drivestudio environment
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ENV_NAME="drivestudio"
+          ARCHIVE_NAME="drivestudio.tar.gz"
+          RELEASE_DIR="release_parts"
+
+          rm -rf "$RELEASE_DIR"
+          mkdir -p "$RELEASE_DIR"
+          rm -f "$ARCHIVE_NAME"
+
+          echo "===== Confirm environment ====="
+          "$CONDA/bin/conda" run -n "$ENV_NAME" python -V
+          "$CONDA/bin/conda" run -n "$ENV_NAME" python -c \
+            "import torch; print('torch:', torch.__version__, 'CUDA:', torch.version.cuda)"
+
+          echo "===== Pack Conda environment ====="
+          "$CONDA/bin/conda-pack" \
+            -n "$ENV_NAME" \
+            -o "$ARCHIVE_NAME" \
+            --format tar.gz \
+            --ignore-missing-files \
+            --force
+
+          echo "===== Packed archive ====="
+          ls -lh "$ARCHIVE_NAME"
+
+          echo "===== Remove environment and caches before splitting ====="
+          rm -rf "$CONDA/envs/$ENV_NAME" || true
+          rm -rf "$CONDA/pkgs" || true
+          rm -rf ~/.cache/pip || true
+          rm -rf ~/.cache/torch || true
+          rm -rf ~/.cache/huggingface || true
+          rm -rf ~/.cache/conda || true
+          rm -rf ~/.nv || true
+          rm -rf /tmp/* || true
+
+          echo "===== Disk before splitting ====="
+          df -h
+
+          split \
+            -b 1000M \
+            -d \
+            -a 3 \
+            "$ARCHIVE_NAME" \
+            "$RELEASE_DIR/drivestudio.tar.gz.part-"
+
+          rm -f "$ARCHIVE_NAME"
+
+          cp environment.yml "$RELEASE_DIR/environment.yml"
+          cp requirements.txt "$RELEASE_DIR/requirements.txt"
+
+          echo "===== Generated release files ====="
+          ls -lh "$RELEASE_DIR"
+
+          echo "===== Disk after splitting ====="
+          df -h
+
+      - name: Create GitHub Release and upload parts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: drivestudio-cu117-conda-${{ github.run_number }}
+          name: DriveStudio CUDA 11.7 Conda Environment ${{ github.run_number }}
+          body: |
+            Prebuilt Linux x64 Conda environment for DriveStudio.
+
+            ## Environment
+
+            ```text
+            Name: drivestudio
+            Python: 3.9
+            PyTorch CUDA: 11.7 (cu117)
+            ```
+
+            ## PyTorch packages
+
+            ```text
+            torch==2.0.0+cu117
+            torchvision==0.15.0+cu117
+            xformers==0.0.18
+            timm==0.9.5
+            pytorch_msssim==1.0.0
+            torchmetrics==0.10.3
+            ```
+
+            PyTorch CUDA wheel source:
+
+            ```text
+            https://download.pytorch.org/whl/cu117
+            ```
+
+            ## Restore
+
+            Download every `drivestudio.tar.gz.part-*` file into one directory.
+
+            ```bash
+            cat drivestudio.tar.gz.part-* > drivestudio.tar.gz
+            mkdir -p drivestudio
+            tar -xzf drivestudio.tar.gz -C drivestudio
+            source drivestudio/bin/activate
+            conda-unpack
+            ```
+
+            Verify the CUDA build:
+
+            ```bash
+            python -c "import torch; print(torch.__version__, torch.version.cuda)"
+            python -c "import torchvision; print(torchvision.__version__)"
+            python -c "import xformers; print(xformers.__version__)"
+            ```
+
+            `environment.yml` and `requirements.txt` are included for manual rebuilding.
+          files: |
+            release_parts/drivestudio.tar.gz.part-*
+            release_parts/environment.yml
+            release_parts/requirements.txt
+          fail_on_unmatched_files: true
